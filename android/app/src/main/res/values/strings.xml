@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">VaaniVerse Offline Classroom</string>
+    <string name="title_activity_main">VaaniVerse Offline Classroom</string>
+    <string name="package_name">org.vaaniverse.classroom</string>
+    <string name="custom_url_scheme">org.vaaniverse.classroom</string>
+</resources>

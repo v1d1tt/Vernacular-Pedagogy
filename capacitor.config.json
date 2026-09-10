@@ -1,0 +1,14 @@
+{
+  "appId": "org.vaaniverse.classroom",
+  "appName": "VaaniVerse Offline Classroom",
+  "webDir": "out",
+  "server": {
+    "androidScheme": "http",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": true
+  }
+}

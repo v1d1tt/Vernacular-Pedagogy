@@ -1,0 +1,121 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Theme tokens ──────────────────────────────────────────────────── */
+:root {
+  /* Surfaces */
+  --bg:          #f0f7ff;
+  --surface:     #ffffff;
+  --surface-2:   #e8f4ff;
+  --border:      #d1e9ff;
+  --border-sub:  #e2f0ff;
+
+  /* Text */
+  --text-primary:   #0c1a2e;
+  --text-secondary: #4a6080;
+  --text-muted:     #8aabb0;
+
+  /* Brand — light sky blue */
+  --brand:        #38bdf8;   /* sky-400 */
+  --brand-dark:   #0ea5e9;   /* sky-500 — hover */
+  --brand-deep:   #0369a1;   /* sky-700 — text on light bg */
+  --brand-tint:   #e0f2fe;   /* sky-100 */
+  --brand-tint2:  #bae6fd;   /* sky-200 — selected state */
+
+  /* Status */
+  --green:        #16a34a;
+  --green-tint:   #dcfce7;
+  --red:          #dc2626;
+  --red-tint:     #fee2e2;
+  --amber:        #d97706;
+  --amber-tint:   #fef3c7;
+  --violet:       #7c3aed;
+  --violet-tint:  #ede9fe;
+
+  /* Card shadow */
+  --shadow: 0 1px 4px rgba(14, 165, 233, 0.07);
+}
+
+.dark {
+  --bg:          #0d1117;
+  --surface:     #161b22;
+  --surface-2:   #1f2937;
+  --border:      #30363d;
+  --border-sub:  #21262d;
+
+  --text-primary:   #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted:     #484f58;
+
+  --brand:        #38bdf8;
+  --brand-dark:   #7dd3fc;
+  --brand-deep:   #bae6fd;
+  --brand-tint:   #0c2333;
+  --brand-tint2:  #164e63;
+
+  --green:        #4ade80;
+  --green-tint:   #052e16;
+  --red:          #f87171;
+  --red-tint:     #2d0808;
+  --amber:        #fbbf24;
+  --amber-tint:   #1c1003;
+  --violet:       #a78bfa;
+  --violet-tint:  #1e0a3c;
+
+  --shadow: 0 1px 6px rgba(0,0,0,0.4);
+}
+
+/* ─── Base ──────────────────────────────────────────────────────────── */
+body {
+  background-color: var(--bg);
+  color: var(--text-primary);
+  font-family: var(--font-jakarta), 'Plus Jakarta Sans', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* ─── Semantic utility classes ───────────────────────────────────────── */
+.vs-bg       { background-color: var(--bg); }
+.vs-surface  { background-color: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow); }
+.vs-surface2 { background-color: var(--surface-2); }
+.vs-border   { border-color: var(--border); }
+.vs-text     { color: var(--text-primary); }
+.vs-text-sub { color: var(--text-secondary); }
+.vs-text-muted { color: var(--text-muted); }
+
+/* Brand button */
+.vs-btn-brand {
+  background-color: var(--brand);
+  color: #0c1a2e;
+  font-weight: 700;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+.vs-btn-brand:hover  { background-color: var(--brand-dark); }
+.vs-btn-brand:active { opacity: 0.9; }
+.vs-btn-brand:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Brand tint */
+.vs-tint        { background-color: var(--brand-tint); color: var(--brand-deep); }
+.vs-tint-border { border-color: var(--brand-tint2); }
+
+/* Input */
+.vs-input {
+  background-color: var(--surface-2);
+  border: 1.5px solid var(--border);
+  color: var(--text-primary);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.vs-input::placeholder { color: var(--text-muted); }
+.vs-input:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 20%, transparent);
+}
+
+/* Card chip / pill */
+.vs-chip-active {
+  background-color: var(--brand-tint2);
+  color: var(--brand-deep);
+  border-color: var(--brand);
+}

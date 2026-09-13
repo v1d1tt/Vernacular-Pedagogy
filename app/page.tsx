@@ -136,6 +136,8 @@ export default function VaaniSetuOnboarding() {
         setAuthError(t("accountExistsError"));
         setTeacherAuthMode("login");
         setLoginName(signupName);
+      } else if (msg === "SERVER_OFFLINE") {
+        setAuthError(t("serverOfflineError"));
       } else {
         setAuthError(t("signupFailedError") || "Signup failed. Please try again.");
       }
@@ -144,7 +146,6 @@ export default function VaaniSetuOnboarding() {
     }
   };
 
-  // ── Student Registration ─────────────────────────────────────────
   const handleStudentRegister = async () => {
     if (!studentName.trim() || !schoolName.trim()) return;
     setIsLoading(true);
@@ -170,6 +171,20 @@ export default function VaaniSetuOnboarding() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // ── Guest Login ──────────────────────────────────────────────────
+  const handleGuestLogin = () => {
+    const langObj = SUPPORTED_LANGUAGES.find((l) => l.code === lang) || SUPPORTED_LANGUAGES[0];
+    localStorage.setItem("user_role", "teacher");
+    localStorage.setItem("user_name", "Guest Teacher");
+    localStorage.setItem("user_lang", lang);
+    localStorage.setItem("user_lang_name", langObj.name);
+    localStorage.setItem("user_grade", "2");
+    localStorage.setItem("user_subject", "General");
+    localStorage.setItem("user_school", "Demo School");
+    localStorage.setItem("is_guest", "true");
+    router.push("/teacher");
   };
 
   const handleContinueExisting = () => {
@@ -509,6 +524,17 @@ export default function VaaniSetuOnboarding() {
                     className="vs-btn-brand w-full py-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 shadow-lg transition disabled:opacity-50">
                     {isLoading ? "..." : t("teacherLoginBtn")}
                   </button>
+
+                  <div className="relative flex items-center gap-3 py-1">
+                    <div className="flex-1 h-px bg-[var(--border)]" />
+                    <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">or</span>
+                    <div className="flex-1 h-px bg-[var(--border)]" />
+                  </div>
+
+                  <button id="btn-guest-login-from-login" onClick={handleGuestLogin}
+                    className="w-full py-3 rounded-xl text-sm font-bold border-2 border-dashed border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--brand)] hover:text-[var(--brand-deep)] hover:bg-[var(--brand-tint)] transition flex items-center justify-center gap-2">
+                    <span>👤</span> {t("guestLoginBtn")}
+                  </button>
                 </div>
               )}
 
@@ -596,6 +622,17 @@ export default function VaaniSetuOnboarding() {
                     disabled={isLoading || !signupName.trim() || !signupSubject.trim() || !signupSchool.trim() || !signupPassword.trim() || !signupConfirmPassword.trim()}
                     className="vs-btn-brand w-full py-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 shadow-lg transition disabled:opacity-50">
                     {isLoading ? "..." : t("teacherSignupBtn")}
+                  </button>
+
+                  <div className="relative flex items-center gap-3 py-1">
+                    <div className="flex-1 h-px bg-[var(--border)]" />
+                    <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">or</span>
+                    <div className="flex-1 h-px bg-[var(--border)]" />
+                  </div>
+
+                  <button id="btn-guest-login-from-signup" onClick={handleGuestLogin}
+                    className="w-full py-3 rounded-xl text-sm font-bold border-2 border-dashed border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--brand)] hover:text-[var(--brand-deep)] hover:bg-[var(--brand-tint)] transition flex items-center justify-center gap-2">
+                    <span>👤</span> {t("guestLoginBtn")}
                   </button>
                 </div>
               )}

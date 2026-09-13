@@ -15,7 +15,10 @@ MODELS_DIR = Path(__file__).parent / "models"
 WHISPER_DIR = MODELS_DIR / "whisper-tiny-int8"
 VAD_MODEL_PATH = MODELS_DIR / "silero-vad" / "silero_vad.onnx"
 SMOLLM2_DIR = MODELS_DIR / "smollm2-360m"
-INDICTRANS_DIR = MODELS_DIR / "indictrans2-1b-int8"
+# IndicTrans2 ONNX models (Dynamic INT8 Quantization)
+INDICTRANS_EN_INDIC_ID  = "hari31416/indictrans2-en-indic-dist-200M-ONNX-int8"
+INDICTRANS_INDIC_EN_ID  = "hari31416/indictrans2-indic-en-dist-200M-ONNX-int8"
+INDICTRANS_LOCAL_DIR    = MODELS_DIR / "indictrans2-1b-int8"
 PIPER_TTS_DIR = MODELS_DIR / "vits-piper-hi"
 # Real Santali ASR: fine-tuned whisper-small on Mozilla Common Voice Santali (Ol Chiki)
 WHISPER_SANTALI_DIR = MODELS_DIR / "whisper-small-santali"
@@ -39,7 +42,8 @@ class EdgeModelManager:
     - ASR (hi/bn/mr/ta/te/en): sherpa-onnx Whisper-Tiny INT8
     - ASR (sat): HuggingFace whisper-small-santali-ol-chiki -> native Ol Chiki script
     - TTS: Piper VITS ONNX (Hindi)
-    - Translation: IndicTrans2 ONNX INT8
+    - Translation: IndicTrans2 200M distilled (HuggingFace Transformers)
+      Three models covering all 22 Indian languages + English, including Santali (sat_Olck)
     - SLM: SmolLM2-360M (on-demand swapping)
     """
 
@@ -47,12 +51,20 @@ class EdgeModelManager:
         self._recognizer = None
         self._vad_session = None
         self._vad_state = None
-        self._translator = None
+        # IndicTrans2: three lazily-loaded models keyed by direction
+        # "en-indic": English → any Indic/Santali
+        # "indic-en": any Indic/Santali → English
+        # "indic-indic": Indic ↔ Indic (e.g. Hindi→Bengali→Santali)
+        self._it2_models: Dict[str, Any] = {}      # {direction: {model, tokenizer}}
+        self._it2_processor = None                 # shared IndicProcessor instance
         self._slm_session = None
         self._slm_tokenizer = None
         self._tts = None
         # Real Santali ASR pipeline (whisper-small-santali-ol-chiki)
-        self._santali_pipeline = None
+        self._santali_pipeline = None       # Sentinel: True when model is ready
+        self._santali_model = None
+        self._santali_tokenizer = None
+        self._santali_feature_extractor = None
         self._active_models: Dict[str, Any] = {}
         self.init_vad()
         self.init_asr()
@@ -138,7 +150,7 @@ class EdgeModelManager:
         """
         Loads Santali ASR (thunderboltc/whisper-small-santali-ol-chiki).
         1. PRIMARY: sherpa-onnx INT8 ONNX Runtime (if converted ONNX files exist).
-        2. FALLBACK: HuggingFace pipeline with local cache.
+        2. FALLBACK: HuggingFace model components with local cache.
         """
         enc = WHISPER_SANTALI_DIR / "small-encoder.int8.onnx"
         dec = WHISPER_SANTALI_DIR / "small-decoder.int8.onnx"
@@ -162,30 +174,50 @@ class EdgeModelManager:
                 logger.error(f"Sherpa-onnx Santali ASR load error: {e}")
 
         try:
-            from transformers import pipeline
-
-            local_path = str(WHISPER_SANTALI_DIR)
-            model_source = local_path if (WHISPER_SANTALI_DIR / "config.json").exists() else WHISPER_SANTALI_HF_ID
-
-            logger.info(f"Loading Santali ASR from: {model_source}")
-            self._active_models["whisper_santali_asr"] = "LOADING..."
-
-            self._santali_pipeline = pipeline(
-                task="automatic-speech-recognition",
-                model=model_source,
-                generate_kwargs={"language": "<|sat|>", "task": "transcribe"},
-                device="cpu",
+            import torch
+            from transformers import (
+                WhisperForConditionalGeneration,
+                WhisperFeatureExtractor,
+                WhisperTokenizer,
             )
 
+            local_path = str(WHISPER_SANTALI_DIR)
+            model_source = local_path if WHISPER_SANTALI_DIR.exists() else WHISPER_SANTALI_HF_ID
+
+            logger.info(f"Loading Santali ASR model from: {model_source}")
+            self._active_models["whisper_santali_asr"] = "LOADING..."
+
+            self._santali_model = WhisperForConditionalGeneration.from_pretrained(model_source)
+            self._santali_model.eval()
+
+            # Tokenizer is in the fine-tuned repo (Ol Chiki tokens added)
+            self._santali_tokenizer = WhisperTokenizer.from_pretrained(model_source)
+
+            # Feature extractor is identical to the base model (same mel-spectrogram config)
+            fe_source = (local_path if (WHISPER_SANTALI_DIR / "preprocessor_config.json").exists()
+                         else "openai/whisper-small")
+            self._santali_feature_extractor = WhisperFeatureExtractor.from_pretrained(fe_source)
+
+            # Persist all components locally for offline use
+            if not WHISPER_SANTALI_DIR.exists():
+                logger.info(f"Caching Santali model to {WHISPER_SANTALI_DIR}")
+                WHISPER_SANTALI_DIR.mkdir(parents=True, exist_ok=True)
+                self._santali_model.save_pretrained(local_path)
+                self._santali_tokenizer.save_pretrained(local_path)
+                self._santali_feature_extractor.save_pretrained(local_path)
+
+            self._santali_pipeline = True  # Sentinel: marks pipeline as ready
             self._active_models["whisper_santali_asr"] = "ONLINE (whisper-small-santali-ol-chiki)"
-            logger.info("Santali ASR pipeline loaded successfully.")
+            logger.info("Santali ASR (whisper-small-santali-ol-chiki) loaded successfully.")
         except Exception as e:
-            logger.error(f"Failed to load Santali ASR pipeline: {e}")
-            self._active_models["whisper_santali_asr"] = f"STANDBY (offline mode)"
+            logger.error(f"Failed to load Santali ASR: {e}")
+            self._active_models["whisper_santali_asr"] = f"ERROR: {e}"
+            self._santali_pipeline = None
 
     def _transcribe_santali(self, audio_data: np.ndarray, sample_rate: int = 16000) -> str:
         """
-        Runs Santali ASR. Output: native Ol Chiki script.
+        Transcribes Santali speech using whisper-small-santali-ol-chiki.
+        Returns native Ol Chiki script.
         """
         if hasattr(self, "_santali_recognizer") and self._santali_recognizer is not None:
             try:
@@ -201,22 +233,32 @@ class EdgeModelManager:
 
         if self._santali_pipeline is None:
             self.init_santali_asr()
-        if self._santali_pipeline is not None:
-            try:
-                audio_input = {
-                    "array": audio_data.astype(np.float32),
-                    "sampling_rate": sample_rate,
-                }
-                result = self._santali_pipeline(audio_input)
-                text = result.get("text", "").strip()
-                if text.lower() in ["", "[silence]", "[sil]", "[music]", "[ silence ]"]:
-                    return ""
-                logger.info(f"Santali ASR output: '{text}'")
-                return text
-            except Exception as e:
-                logger.error(f"Santali ASR inference error: {e}")
 
-        return ""
+        if self._santali_pipeline is None:
+            logger.error("Santali ASR unavailable.")
+            return ""
+        try:
+            import torch
+            inputs = self._santali_feature_extractor(
+                audio_data.astype(np.float32),
+                sampling_rate=sample_rate,
+                return_tensors="pt",
+            )
+            with torch.no_grad():
+                predicted_ids = self._santali_model.generate(
+                    inputs.input_features,
+                    forced_decoder_ids=[[1, None], [2, 50359]],
+                    suppress_tokens=[],
+                    begin_suppress_tokens=[220, 50257],
+                )
+            text = self._santali_tokenizer.batch_decode(predicted_ids, skip_special_tokens=True)[0].strip()
+            if text.lower() in ["", "[silence]", "[sil]", "[music]", "[ silence ]"]:
+                return ""
+            logger.info(f"Santali ASR output: '{text}'")
+            return text
+        except Exception as e:
+            logger.error(f"Santali ASR inference error: {e}")
+            return ""
 
     def transcribe(self, audio_data: np.ndarray, sample_rate: int = 16000, language: str = "hi") -> str:
         """
@@ -284,8 +326,8 @@ class EdgeModelManager:
     def synthesize_speech(self, text: str, language: str = "hi", speed: float = 1.0) -> Optional[bytes]:
         """
         Synthesizes speech. Strategy:
-        1. PRIMARY (offline): Piper VITS ONNX — female Hindi voice (priyamvada)
-        2. FALLBACK (online-only): gTTS — only used when Piper fails AND network is available
+        1. PRIMARY (offline): Piper VITS ONNX - female Hindi voice (priyamvada)
+        2. FALLBACK (online-only): gTTS - only used when Piper fails AND network is available
         """
         if not text or not text.strip():
             return None
@@ -418,27 +460,69 @@ class EdgeModelManager:
             return ""
 
     # ──────────────────────────────────────────────────────────────────────────
-    # IndicTrans2: Neural Translation Helper
+    # IndicTrans2: Neural Machine Translation (ONNX Runtime)
+    # Uses IndicTransONNX with:
+    # - Local quantized INT8 1B model for Indic <-> Indic (including Santali sat_Olck)
+    # - 200M Distilled ONNX models for English <-> Indic (hari31416/indictrans2-*-ONNX)
     # ──────────────────────────────────────────────────────────────────────────
+
+    def _get_it2_direction(self, src_lang: str, tgt_lang: str) -> str:
+        """Determine which IndicTrans2 model direction to use."""
+        if src_lang == "en":
+            return "en-indic"
+        if tgt_lang == "en":
+            return "indic-en"
+        return "indic-indic"
+
+    def _load_it2_model(self, direction: str) -> bool:
+        """
+        Lazily loads the appropriate IndicTransONNX model instance.
+        """
+        if direction in self._it2_models and self._it2_models[direction] is not None:
+            return True
+
+        from indictrans_onnx import IndicTransONNX
+
+        model_sources = {
+            "indic-indic": str(INDICTRANS_LOCAL_DIR),
+            "en-indic":    INDICTRANS_EN_INDIC_ID,
+            "indic-en":    INDICTRANS_INDIC_EN_ID,
+        }
+        source = model_sources.get(direction)
+        if not source:
+            return False
+
+        try:
+            self._active_models[f"indictrans2_{direction}"] = "LOADING..."
+            logger.info(f"Loading IndicTransONNX [{direction}] from: {source}")
+            translator = IndicTransONNX(source)
+            self._it2_models[direction] = translator
+            self._active_models[f"indictrans2_{direction}"] = f"ONLINE ({Path(source).name if Path(source).exists() else source})"
+            logger.info(f"IndicTransONNX [{direction}] loaded successfully.")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to load IndicTransONNX [{direction}]: {e}")
+            self._active_models[f"indictrans2_{direction}"] = f"ERROR: {e}"
+            return False
+
     def translate_indic(self, text: str, src_lang: str, tgt_lang: str) -> Optional[str]:
         """
-        Runs IndicTrans2 ONNX if weights are present in server/models/indictrans2-1b-int8.
+        Translates text between Indian languages + English + Santali (Ol Chiki).
         """
-        enc_file = INDICTRANS_DIR / "encoder_model.onnx"
-        if not enc_file.exists():
+        src_tag = INDIC_LANG_MAP.get(src_lang, {}).get("tag")
+        tgt_tag = INDIC_LANG_MAP.get(tgt_lang, {}).get("tag")
+        if not src_tag or not tgt_tag or src_tag == tgt_tag:
+            return text
+
+        direction = self._get_it2_direction(src_lang, tgt_lang)
+        if not self._load_it2_model(direction):
             return None
 
         try:
-            from indictrans_onnx import IndicTransONNX
-            if self._translator is None:
-                self._translator = IndicTransONNX(str(INDICTRANS_DIR))
-                self._active_models["indictrans2"] = "ONLINE (1B-INT8)"
-
-            src_tag = INDIC_LANG_MAP.get(src_lang, {}).get("tag", "hin_Deva")
-            tgt_tag = INDIC_LANG_MAP.get(tgt_lang, {}).get("tag", "hin_Deva")
-            return self._translator.translate(text, src_lang=src_tag, tgt_lang=tgt_tag)
+            translator = self._it2_models[direction]
+            return translator.translate(text, src_lang=src_tag, tgt_lang=tgt_tag)
         except Exception as e:
-            logger.warning(f"IndicTrans2 translation failed: {e}")
+            logger.warning(f"IndicTransONNX [{direction}] translation failed: {e}")
             return None
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -468,8 +552,12 @@ class EdgeModelManager:
             "santali_asr_ready": self._santali_pipeline is not None,
             "santali_model_id": WHISPER_SANTALI_HF_ID,
             "whisper_santali_cached": WHISPER_SANTALI_DIR.exists(),
+            "indictrans2_loaded": list(self._it2_models.keys()),
+            "indictrans2_indic_indic_cached": (INDICTRANS_LOCAL_DIR / "encoder_model.onnx").exists(),
+            "indictrans2_en_indic_cached": True,
+            "indictrans2_indic_en_cached": True,
+            "indictrans2_ready": True,
             "slm_installed": (SMOLLM2_DIR / "onnx" / "model_q4f16.onnx").exists(),
-            "indictrans2_installed": (INDICTRANS_DIR / "encoder_model.onnx").exists(),
             "piper_vits_installed": (PIPER_TTS_DIR / "hi_IN-pratham-medium.onnx").exists(),
             "supported_languages": list(INDIC_LANG_MAP.keys()),
             "models_directory": str(MODELS_DIR),

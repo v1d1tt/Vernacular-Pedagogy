@@ -2,14 +2,15 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { fetchActiveSessions, joinSession, connectWebSocket, transcribeAudio, broadcastSpeech, getEdgeCandidates, detectActiveEdgeServer, getEdgeServerUrl, fetchPublishedActivities } from "@/lib/api-client";
+import { fetchActiveSessions, joinSession, connectWebSocket, transcribeAudio, broadcastSpeech, detectActiveEdgeServer, getEdgeServerUrl, fetchPublishedActivities } from "@/lib/api-client";
 import { AudioRecorder } from "@/lib/audio-recorder";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LanguageSwitch } from "@/components/language-switch";
 import { useLanguage } from "@/components/language-provider";
-import { Volume2, Hand, HelpCircle, BookOpen, ArrowLeft, CheckCircle2, Mic, MicOff, Award, Globe, ChevronDown } from "lucide-react";
+import { Volume2, Hand, HelpCircle, BookOpen, ArrowLeft, CheckCircle2, Mic, MicOff, Award, Globe, ChevronDown, Square } from "lucide-react";
 import { MicWaveform } from "@/components/mic-waveform";
 import { SUPPORTED_LANGUAGES } from "@/lib/nipun-data";
+import { prepareTtsText } from "@/lib/ol-chiki";
 
 export interface StudentActivity {
   activity_id: string;
@@ -65,10 +66,10 @@ const FLASHCARDS_DATA: Record<string, Array<{ word: string; eng: string; desc: s
     { word: "పువ్వు", eng: "Flower", desc: "రంగురంగుల మరియు సువాసనగల", visual: "🌸", tint: "var(--red-tint)" },
   ],
   sat: [
-    { word: "ᱧᱤᱫᱟᱹ", eng: "Sun", desc: "ᱥᱮᱨᱢᱟ ᱨᱮ ᱡᱟᱞᱟᱜ ᱤᱯᱤᱞ", visual: "☀️", tint: "var(--amber-tint)" },
-    { word: "ᱫᱟᱨᱮ", eng: "Tree", desc: "ᱧᱤᱫᱟ ᱟᱨ ᱚᱠᱥᱤᱡᱮᱱ ᱮᱢᱟ", visual: "🌳", tint: "var(--green-tint)" },
-    { word: "ᱫᱟᱹᱜ", eng: "Water", desc: "ᱡᱤᱭᱚᱱ ᱞᱟᱹᱜᱤᱫ ᱫᱚᱨᱠᱟᱨ", visual: "💧", tint: "var(--brand-tint)" },
-    { word: "ᱵᱟᱦᱟ", eng: "Flower", desc: "ᱨᱚᱝ-ᱵᱮᱨᱚᱝ ᱟᱨ ᱥᱩᱵᱟᱥ", visual: "🌸", tint: "var(--red-tint)" },
+    { word: "ᱥᱤᱧ ᱪᱟᱸᱫᱚ", eng: "Sun", desc: "ᱥᱮᱨᱢᱟ ᱨᱮ ᱡᱩᱞᱩᱜ ᱠᱟᱱᱟ", visual: "☀️", tint: "var(--amber-tint)" },
+    { word: "ᱫᱟᱨᱮ", eng: "Tree", desc: "ᱩᱢᱩᱞ ᱟᱨ ᱦᱚᱭ ᱮᱢᱚᱜᱼᱟ", visual: "🌳", tint: "var(--green-tint)" },
+    { word: "ᱫᱟᱜ", eng: "Water", desc: "ᱡᱤᱣᱤ ᱞᱟᱹᱜᱤᱫ ᱡᱟᱹᱨᱩᱲ ᱠᱟᱱᱟ", visual: "💧", tint: "var(--brand-tint)" },
+    { word: "ᱵᱟᱦᱟ", eng: "Flower", desc: "ᱨᱚᱝᱼᱵᱮᱨᱚᱝ ᱟᱨ ᱥᱚ ᱟᱱᱟᱜ", visual: "🌸", tint: "var(--red-tint)" },
   ],
 };
 
@@ -105,9 +106,15 @@ export default function StudentConsole() {
   );
   const [showLangPicker, setShowLangPicker] = useState(false);
   const studentLangRef = useRef(studentLang);
+  const joinedSessionRef = useRef(joinedSession);
+
   useEffect(() => {
     studentLangRef.current = studentLang;
   }, [studentLang]);
+
+  useEffect(() => {
+    joinedSessionRef.current = joinedSession;
+  }, [joinedSession]);
 
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [ttfa, setTtfa] = useState<number | null>(null);
@@ -136,20 +143,197 @@ export default function StudentConsole() {
       mr: "नमस्कार मुलांनो, आज आपण गणितात नवीन गोष्टी शिकणार आहोत.",
       ta: "வணக்கம் குழந்தைகளே, இன்று நாம் கணிதத்தில் புதிய விஷயங்களைக் கற்றுக்கொள்வோம்.",
       te: "నమస్కారం పిల్లలు, ఈరోజు మనం గణితంలో కొత్త విషయాలు నేర్చుకుందాం.",
-      sat: "ᱡᱚᱦᱟᱨ ᱜᱤᱫᱽᱨᱟᱹ, ᱛᱮᱦᱮᱧ ᱟᱵᱚ ᱮᱞᱠᱷᱟ ᱨᱮ ᱱᱟᱶᱟ ᱡᱤᱱᱤᱥ ᱵᱚᱱ ᱪᱮᱫᱚᱜᱼᱟ᱾",
+      sat: "ᱡᱚᱦᱟᱨ ᱜᱤᱫᱽᱨᱟᱹ ᱠᱚ, ᱛᱮᱦᱮᱧ ᱟᱵᱚ ᱮᱞᱠᱷᱟ ᱨᱮ ᱱᱟᱣᱟ ᱡᱤᱱᱤᱥ ᱵᱚᱱ ᱪᱮᱫᱚᱜᱼᱟ ᱾",
     };
     if (initialGreetings[code]) {
       setTranslatedSpeech(initialGreetings[code]);
     }
   };
 
+  // Pre-load SpeechSynthesis voices early
+  useEffect(() => {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      try {
+        window.speechSynthesis.getVoices();
+        const onVoices = () => {
+          window.speechSynthesis.getVoices();
+        };
+        window.speechSynthesis.addEventListener("voiceschanged", onVoices);
+        return () => {
+          window.speechSynthesis.removeEventListener("voiceschanged", onVoices);
+        };
+      } catch {}
+    }
+  }, []);
+
+  const stopAudio = useCallback(() => {
+    if (typeof window !== "undefined") {
+      try {
+        if ("speechSynthesis" in window) {
+          window.speechSynthesis.cancel();
+        }
+        const win = window as WindowWithAudio;
+        if (win._activeAudio) {
+          win._activeAudio.pause();
+          win._activeAudio = null;
+        }
+        win._activeUtterance = null;
+      } catch {}
+    }
+    setIsPlayingAudio(false);
+  }, []);
+
   const playSyntheticAudio = useCallback(async (text: string, forceLang?: string) => {
-    if (!text || !text.trim()) return;
     const targetLang = forceLang || studentLang;
+    const rawText = text?.trim() || "Hello, welcome to class.";
+
+    // If currently playing, clicking again stops playback
+    if (isPlayingAudio) {
+      stopAudio();
+      return;
+    }
+
+    // 1. Prepare phonetic text (translates Ol Chiki Santali script into Hindi/Devanagari phonetics)
+    const { speechText, speechLang } = prepareTtsText(rawText, targetLang);
 
     setIsPlayingAudio(true);
 
-    // 1. Immediately unlock audio context on direct user gesture for mobile WebView
+    // 2. Unlock AudioContext on direct user gesture
+    if (typeof window !== "undefined") {
+      try {
+        const win = window as WindowWithAudio;
+        const AudioCtx = win.AudioContext || win.webkitAudioContext;
+        if (AudioCtx) {
+          const ctx = win._audioCtx || new AudioCtx();
+          win._audioCtx = ctx;
+          if (ctx.state === "suspended") {
+            ctx.resume();
+          }
+        }
+      } catch {}
+    }
+
+    // Helper: Browser native SpeechSynthesis (instant, zero network latency, preserves gesture)
+    const trySpeechSynthesis = (): boolean => {
+      try {
+        if (typeof window === "undefined" || !("speechSynthesis" in window)) return false;
+
+        window.speechSynthesis.cancel();
+        if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
+        }
+
+        const utterance = new SpeechSynthesisUtterance(speechText);
+        utterance.lang = speechLang;
+        utterance.rate = 0.9;
+        utterance.pitch = 1.0;
+
+        // Try to match available voices on device
+        const voices = window.speechSynthesis.getVoices();
+        const prefix = speechLang.split("-")[0].toLowerCase();
+        const voiceMatch = voices.find((v) => {
+          const l = (v.lang || "").toLowerCase().replace("_", "-");
+          return l.startsWith(prefix);
+        }) || voices.find((v) => (v.lang || "").toLowerCase().includes("in")) || voices[0];
+
+        if (voiceMatch) {
+          utterance.voice = voiceMatch;
+        }
+
+        const win = window as WindowWithAudio;
+        win._activeUtterance = utterance;
+
+        let finished = false;
+        let resumeTimer: NodeJS.Timeout | null = null;
+        let safetyTimer: NodeJS.Timeout | null = null;
+
+        const finalize = () => {
+          if (!finished) {
+            finished = true;
+            if (resumeTimer) clearInterval(resumeTimer);
+            if (safetyTimer) clearTimeout(safetyTimer);
+            win._activeUtterance = null;
+            setIsPlayingAudio(false);
+          }
+        };
+
+        utterance.onend = finalize;
+        utterance.onerror = (e) => {
+          console.warn("SpeechSynthesis utterance error:", e);
+          finalize();
+        };
+
+        // Android WebView keep-alive: periodically call resume
+        resumeTimer = setInterval(() => {
+          if (typeof window !== "undefined" && "speechSynthesis" in window) {
+            if (!window.speechSynthesis.speaking && !window.speechSynthesis.pending) {
+              finalize();
+            } else {
+              window.speechSynthesis.resume();
+            }
+          }
+        }, 200);
+
+        // Watchdog: max 8 seconds safety timeout so button never gets stuck
+        safetyTimer = setTimeout(() => {
+          finalize();
+        }, 8000);
+
+        window.speechSynthesis.speak(utterance);
+        console.log(`SpeechSynthesis started: "${speechText.slice(0, 30)}..." in ${speechLang}`);
+        return true;
+      } catch (err) {
+        console.warn("SpeechSynthesis error:", err);
+        return false;
+      }
+    };
+
+    // 3. Trigger SpeechSynthesis immediately on user click
+    const spokeNatively = trySpeechSynthesis();
+    if (spokeNatively) {
+      return;
+    }
+
+    // 4. Fallback: Neural TTS from edge backend if SpeechSynthesis not available
+    try {
+      const serverUrl = getEdgeServerUrl();
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2500);
+
+      const res = await fetch(
+        `${serverUrl}/api/tts/speak?text=${encodeURIComponent(rawText)}&lang=${encodeURIComponent(targetLang)}`,
+        { signal: controller.signal }
+      );
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const blob = await res.blob();
+        if (blob.size > 200) {
+          const blobUrl = URL.createObjectURL(blob);
+          const audio = new Audio(blobUrl);
+          const win = window as WindowWithAudio;
+          win._activeAudio = audio;
+
+          audio.onended = () => {
+            URL.revokeObjectURL(blobUrl);
+            win._activeAudio = null;
+            setIsPlayingAudio(false);
+          };
+          audio.onerror = () => {
+            URL.revokeObjectURL(blobUrl);
+            win._activeAudio = null;
+            setIsPlayingAudio(false);
+          };
+
+          await audio.play();
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn("Neural TTS fallback failed:", err);
+    }
+
+    // 5. Ultimate fallback: Web Audio synthesized tone melody
     if (typeof window !== "undefined") {
       try {
         const win = window as WindowWithAudio;
@@ -158,132 +342,24 @@ export default function StudentConsole() {
           const ctx = win._audioCtx || new AudioCtx();
           win._audioCtx = ctx;
           if (ctx.state === "suspended") ctx.resume();
+
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
+          osc.frequency.exponentialRampToValueAtTime(659.25, ctx.currentTime + 0.15); // E5
+          gain.gain.setValueAtTime(0.2, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start();
+          osc.stop(ctx.currentTime + 0.3);
         }
       } catch {}
     }
 
-    const fallbackToSpeechSynthesis = () => {
-      try {
-        if (typeof window !== "undefined" && "speechSynthesis" in window) {
-          window.speechSynthesis.cancel();
-          window.speechSynthesis.resume();
-
-          const utterance = new SpeechSynthesisUtterance(text);
-          const langMap: Record<string, string> = {
-            hi: "hi-IN",
-            bn: "bn-IN",
-            mr: "mr-IN",
-            ta: "ta-IN",
-            te: "te-IN",
-            en: "en-IN",
-          };
-          utterance.lang = langMap[targetLang] || "hi-IN";
-          utterance.rate = 0.9;
-          utterance.pitch = 1.25; // Female voice pitch modulation
-
-          // Select matching female voice if available
-          const voices = window.speechSynthesis.getVoices();
-          const langPrefix = targetLang.toLowerCase().slice(0, 2);
-          const femaleMatch = voices.find((v) => {
-            const vl = (v.lang || "").toLowerCase().replace("_", "-");
-            const vn = (v.name || "").toLowerCase();
-            return vl.startsWith(langPrefix) && (vn.includes("female") || vn.includes("woman") || vn.includes("swara") || vn.includes("google") || vn.includes("kalpana"));
-          }) || voices.find((v) => {
-            const vl = (v.lang || "").toLowerCase().replace("_", "-");
-            return vl.startsWith(langPrefix);
-          });
-          if (femaleMatch) {
-            utterance.voice = femaleMatch;
-          }
-
-          // Retain utterance on window to prevent Android WebView garbage collection silence bug
-          const win = window as WindowWithAudio;
-          win._activeUtterance = utterance;
-
-          let ended = false;
-          const finalize = () => {
-            if (!ended) {
-              ended = true;
-              win._activeUtterance = null;
-              setIsPlayingAudio(false);
-            }
-          };
-
-          utterance.onend = finalize;
-          utterance.onerror = finalize;
-
-          // Android WebView pause workaround: periodically call resume
-          const resumeTimer = setInterval(() => {
-            if (!window.speechSynthesis.speaking) {
-              clearInterval(resumeTimer);
-              finalize();
-            } else {
-              window.speechSynthesis.resume();
-            }
-          }, 250);
-
-          setTimeout(() => {
-            clearInterval(resumeTimer);
-            finalize();
-          }, 8000);
-
-          window.speechSynthesis.speak(utterance);
-          return;
-        }
-      } catch (err) {
-        console.warn("SpeechSynthesis error:", err);
-      }
-      setIsPlayingAudio(false);
-    };
-
-    // 2. Try neural TTS from candidate hosts (Android emulator 10.0.2.2, adb reverse localhost:8000, LAN IP)
-    const candidates = getEdgeCandidates();
-    let played = false;
-
-    for (const host of candidates) {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 1800);
-
-        const res = await fetch(
-          `${host}/api/tts/speak?text=${encodeURIComponent(text)}&lang=${encodeURIComponent(targetLang)}`,
-          { signal: controller.signal }
-        );
-        clearTimeout(timeoutId);
-
-        if (res.ok) {
-          const blob = await res.blob();
-          if (blob.size > 200) {
-            const blobUrl = URL.createObjectURL(blob);
-            const audio = new Audio(blobUrl);
-            const win = window as WindowWithAudio;
-            win._activeAudio = audio;
-
-            audio.onended = () => {
-              URL.revokeObjectURL(blobUrl);
-              win._activeAudio = null;
-              setIsPlayingAudio(false);
-            };
-            audio.onerror = () => {
-              URL.revokeObjectURL(blobUrl);
-              win._activeAudio = null;
-              fallbackToSpeechSynthesis();
-            };
-
-            await audio.play();
-            played = true;
-            break;
-          }
-        }
-      } catch {
-        // Try next candidate host
-      }
-    }
-
-    if (!played) {
-      fallbackToSpeechSynthesis();
-    }
-  }, [studentLang]);
+    setIsPlayingAudio(false);
+  }, [studentLang, isPlayingAudio, stopAudio]);
 
   useEffect(() => {
     const s = localStorage.getItem("user_name");
@@ -308,7 +384,10 @@ export default function StudentConsole() {
       setTranslatedSpeech(initialGreetings[l]);
     }
 
+    let pollInterval: NodeJS.Timeout | null = null;
+    
     async function init() {
+      if (joinedSessionRef.current) return;
       try {
         await detectActiveEdgeServer();
         const res = await fetchActiveSessions();
@@ -355,6 +434,7 @@ export default function StudentConsole() {
               }
             }
           });
+          if (pollInterval) clearInterval(pollInterval);
         } else {
           setJoinedSession({ session_id: "LOCAL-DEMO-01" });
         }
@@ -363,7 +443,15 @@ export default function StudentConsole() {
         setJoinedSession({ session_id: "LOCAL-DEMO-01" });
       }
     }
+    
     init();
+    pollInterval = setInterval(() => {
+      init();
+    }, 3000);
+    
+    return () => {
+      if (pollInterval) clearInterval(pollInterval);
+    };
   }, [participantId, playSyntheticAudio]);
 
   const handleToggleRaiseHand = async () => {
@@ -586,16 +674,25 @@ export default function StudentConsole() {
 
                 {/* Replay in Student's Language */}
                 <button
+                  type="button"
                   onClick={() => playSyntheticAudio(translatedSpeech, studentLang)}
-                  disabled={isPlayingAudio}
-                  className={`w-full py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition ${
+                  className={`w-full py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition active:scale-[0.98] ${
                     isPlayingAudio
-                      ? "bg-[var(--red-tint)] border-2 border-[var(--red)] text-[var(--red)] animate-pulse"
-                      : "vs-btn-brand"
+                      ? "bg-[var(--red-tint)] border-2 border-[var(--red)] text-[var(--red)] animate-pulse shadow-sm"
+                      : "vs-btn-brand shadow-sm"
                   }`}
                 >
-                  <Volume2 className="w-4 h-4" />
-                  {isPlayingAudio ? t("playingAudioState") : `${t("replayInMyLang")} (${studentLangName})`}
+                  {isPlayingAudio ? (
+                    <>
+                      <Square className="w-4 h-4 fill-current" />
+                      <span>{t("playingAudioState")} (Tap to Stop)</span>
+                    </>
+                  ) : (
+                    <>
+                      <Volume2 className="w-4 h-4" />
+                      <span>{`${t("replayInMyLang")} (${studentLangName})`}</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>
@@ -728,9 +825,9 @@ export default function StudentConsole() {
                   <p className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">{card.eng}</p>
                   <p className="text-[11px] text-[var(--text-secondary)]">{card.desc}</p>
                   <button
+                    type="button"
                     onClick={() => playSyntheticAudio(card.word, studentLang)}
-                    disabled={isPlayingAudio}
-                    className="mt-2 w-full py-2.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--brand)] text-[var(--text-secondary)] hover:text-[var(--brand-deep)] font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 disabled:opacity-50"
+                    className="mt-2 w-full py-2.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--brand)] text-[var(--text-secondary)] hover:text-[var(--brand-deep)] font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95"
                   >
                     <Volume2 className="w-3.5 h-3.5" /> {t("pronounce")}
                   </button>

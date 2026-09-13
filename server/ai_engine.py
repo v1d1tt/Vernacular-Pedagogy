@@ -247,20 +247,217 @@ def translate_speech(original_text: str, source_lang: str, target_languages: Lis
         "edge_runtime": "ONNX Runtime (CPU/XNNPACK)"
     }
 
-def generate_nipun_content(transcript: str, grade: int, activity_type: str) -> Dict[str, Any]:
+def _extract_keywords(transcript: str) -> list:
     """
-    Generates NIPUN FLN educational activities with asynchronous memory swapping.
+    Extract meaningful keywords from a lesson transcript.
+    Simple frequency-based approach — no extra dependencies.
     """
-    # 1. Asynchronous Model Swapping Notification
-    logger.info(f"Generating {activity_type} for Grade {grade} FLN curriculum.")
+    import re
+    # Normalise: lowercase, strip punctuation
+    text = re.sub(r"[^\w\s]", " ", transcript.lower())
+    words = text.split()
+
+    # Stop words to ignore
+    stop_words = {
+        "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+        "have", "has", "had", "do", "does", "did", "will", "would", "shall",
+        "should", "may", "might", "must", "can", "could", "this", "that",
+        "these", "those", "i", "we", "you", "he", "she", "it", "they", "them",
+        "our", "your", "his", "her", "its", "their", "what", "which", "who",
+        "whom", "when", "where", "why", "how", "all", "each", "every", "both",
+        "few", "more", "most", "other", "some", "such", "no", "nor", "not",
+        "only", "same", "so", "than", "too", "very", "just", "and", "but",
+        "or", "for", "of", "in", "on", "to", "at", "by", "from", "with",
+        "about", "into", "through", "during", "before", "after", "above",
+        "below", "up", "down", "out", "off", "over", "under", "again",
+        "then", "once", "here", "there", "today", "learn", "learning",
+        "will", "class", "grade", "children", "students", "let", "us",
+        "hello", "namaste", "hum", "aaj", "mein", "hai", "hain", "ke",
+        "ka", "ki", "ko", "se", "ne", "par", "ye", "jo", "bhi", "nahi"
+    }
+
+    freq: dict = {}
+    for w in words:
+        if len(w) > 2 and w not in stop_words:
+            freq[w] = freq.get(w, 0) + 1
+
+    # Sort by frequency, return top 10
+    sorted_kw = sorted(freq.items(), key=lambda x: x[1], reverse=True)
+    return [k for k, _ in sorted_kw[:10]]
+
+
+def _build_quiz_from_transcript(transcript: str, grade: int, slm_question: str) -> dict:
+    """Build contextually relevant quiz questions from lesson transcript keywords."""
+    keywords = _extract_keywords(transcript)
+    topic = keywords[0].capitalize() if keywords else "Counting"
+    topic2 = keywords[1].capitalize() if len(keywords) > 1 else "Numbers"
+
+    # Use SLM-generated question as Q1 if available, else build from keywords
+    q1_text = slm_question if slm_question else f"Which of these is related to '{topic}'?"
+    q1_options = [topic, topic2, "Sky", "Book"]
+    q1_correct = topic
+
+    # Numeracy questions based on grade
+    if grade == 1:
+        q2_text = f"How many letters are in the word '{topic}'?"
+        q2_options = [str(max(1, len(topic)-1)), str(len(topic)), str(len(topic)+1), str(len(topic)+2)]
+        q2_correct = str(len(topic))
+        q3_text = "Count and choose: 🌟🌟🌟 = ?"
+        q3_options = ["2", "3", "4", "5"]
+        q3_correct = "3"
+    elif grade == 2:
+        q2_text = f"In today's lesson about '{topic}', how many main ideas did the teacher share?"
+        q2_options = ["1", "2", "3", "4"]
+        q2_correct = "2"
+        q3_text = "What is 6 + 4?"
+        q3_options = ["8", "9", "10", "11"]
+        q3_correct = "10"
+    else:
+        q2_text = f"Which word best describes '{topic}' from today's lesson?"
+        q2_options = [topic2, "Shape", "Number", topic]
+        q2_correct = topic
+        q3_text = "What is 3 × 4?"
+        q3_options = ["10", "12", "14", "16"]
+        q3_correct = "12"
+
+    return {
+        "questions": [
+            {
+                "id": "q1",
+                "question": q1_text,
+                "options": q1_options,
+                "correct": q1_correct,
+                "visual": "LESSON_TOPIC",
+                "topic": topic
+            },
+            {
+                "id": "q2",
+                "question": q2_text,
+                "options": q2_options,
+                "correct": q2_correct,
+                "visual": "NUMBER_LINE"
+            },
+            {
+                "id": "q3",
+                "question": q3_text,
+                "options": q3_options,
+                "correct": q3_correct,
+                "visual": "SHAPES"
+            }
+        ]
+    }
+
+
+def _build_flashcards_from_transcript(transcript: str, grade: int) -> list:
+    """Build flashcards from lesson vocabulary keywords."""
+    keywords = _extract_keywords(transcript)
+    VISUALS = ["📚", "🌟", "🎯", "🔢", "📐", "🌿", "💡", "🎨", "🔤", "🌍"]
+    COLORS = ["#FB773C", "#2EB9DF", "#EB3678", "#EC4899", "#22c55e", "#8b5cf6", "#f59e0b", "#06b6d4"]
+
+    cards = []
+    for i, kw in enumerate(keywords[:6]):
+        cards.append({
+            "word": kw.capitalize(),
+            "phonics": "-".join(kw.upper()[:4]) if len(kw) >= 2 else kw.upper(),
+            "meaning": f"A key concept from today's lesson",
+            "visual": VISUALS[i % len(VISUALS)],
+            "color": COLORS[i % len(COLORS)]
+        })
+
+    # Ensure at least 3 cards
+    if not cards:
+        cards = [
+            {"word": "Today's Topic", "phonics": "T-O-P-I-C", "meaning": "The subject of today's class", "visual": "📚", "color": "#FB773C"},
+            {"word": "Learning", "phonics": "L-E-A-R-N", "meaning": "Gaining new knowledge", "visual": "🌟", "color": "#2EB9DF"},
+            {"word": "Practice", "phonics": "P-R-A-C-T", "meaning": "Repeating to get better", "visual": "🎯", "color": "#EC4899"},
+        ]
+    return cards
+
+
+def generate_nipun_content(transcript: str, grade: int, activity_type: str, lang: str = "hi") -> Dict[str, Any]:
+    """
+    Generates NIPUN FLN educational activities based on the actual lesson transcript.
+    Uses keyword extraction + SmolLM2-360M for contextual question generation.
+    """
+    logger.info(f"Generating {activity_type} for Grade {grade} FLN from transcript ({len(transcript)} chars).")
+
+    # Run on-demand SLM inference for question generation
+    ai_generated_question = ""
+    clean_summary = transcript.strip() if transcript else ""
+    if clean_summary:
+        try:
+            slm_prompt = f"Create 1 simple question for Grade {grade} students based on this lesson: {clean_summary[:150]}"
+            ai_generated_question = edge_ai.generate_with_slm(slm_prompt, max_new_tokens=50)
+            logger.info(f"SmolLM2 generated: '{ai_generated_question}'")
+        except Exception as e:
+            logger.warning(f"SmolLM2 generation error: {e}")
+
+    keywords = _extract_keywords(clean_summary)
+    topic = keywords[0].capitalize() if keywords else "Lesson"
 
     if activity_type == "QUIZ":
+        quiz_data = _build_quiz_from_transcript(clean_summary, grade, ai_generated_question)
+        content = {
+            "title": f"Grade {grade} Quiz: {topic}",
+            **quiz_data
+        }
+    elif activity_type == "FLASHCARD":
+        cards = _build_flashcards_from_transcript(clean_summary, grade)
+        content = {
+            "title": f"Grade {grade} Vocabulary: {topic}",
+            "cards": cards
+        }
+    else:  # WORKSHEET
+        kw1 = keywords[0].capitalize() if keywords else "Topic"
+        kw2 = keywords[1].capitalize() if len(keywords) > 1 else "Concept"
+        content = {
+            "title": f"Grade {grade} Worksheet: {topic}",
+            "tasks": [
+                {"task": f"Write 2 sentences about '{kw1}' from today's class.", "answer": ""},
+                {"task": f"Draw or describe what '{kw2}' means.", "answer": ""},
+                {"task": "Fill in the blank: Today I learned about ______.", "answer": topic}
+            ]
+        }
+
+    # Swap back to ASR/MT pipeline
+    edge_ai.unload_slm()
+
+    return {
+        "activity_type": activity_type,
+        "grade": grade,
+        "domain": "Numeracy & Literacy",
+        "skill": "Foundational Learning (NIPUN)",
+        "content": content,
+        "generator": "Edge SLM (SmolLM2-360M) + Keyword Extraction",
+        "raw_slm_output": ai_generated_question,
+        "lesson_keywords": keywords[:5]
+    }
+
+    """
+    Generates NIPUN FLN educational activities with asynchronous memory swapping.
+    Runs real SmolLM2-360M inference on-demand.
+    """
+    logger.info(f"Generating {activity_type} for Grade {grade} FLN curriculum.")
+
+    # Run real on-demand SLM inference using SmolLM2-360M
+    ai_generated_question = ""
+    clean_summary = transcript.strip() if transcript else ""
+    if clean_summary:
+        try:
+            slm_prompt = f"Create 1 simple question for Grade {grade} students based on this lesson: {clean_summary[:120]}"
+            ai_generated_question = edge_ai.generate_with_slm(slm_prompt, max_new_tokens=40)
+            logger.info(f"SmolLM2 generated activity question: '{ai_generated_question}'")
+        except Exception as e:
+            logger.warning(f"SmolLM2 generation error: {e}")
+
+    if activity_type == "QUIZ":
+        q1_text = ai_generated_question if ai_generated_question else "How many apples are shown below? 🍎 🍎 🍎"
         content = {
             "title": f"Grade {grade} NIPUN Quick Quiz",
             "questions": [
                 {
                     "id": "q1",
-                    "question": "How many apples are shown below? ðŸ�Ž ðŸ�Ž ðŸ�Ž",
+                    "question": q1_text,
                     "options": ["2", "3", "4", "5"],
                     "correct": "3",
                     "visual": "COUNTING_APPLES",
@@ -288,17 +485,17 @@ def generate_nipun_content(transcript: str, grade: int, activity_type: str) -> D
         content = {
             "title": f"Grade {grade} Vocabulary & Phonics Flashcards",
             "cards": [
-                {"word": "à¤¸à¥‚à¤°à¤œ (Sun)", "phonics": "S-u-n", "meaning": "Bright star in sky", "visual": "â˜€ï¸�", "color": "#FB773C"},
-                {"word": "à¤ªà¥‡à¤¡à¤¼ (Tree)", "phonics": "T-r-e-e", "meaning": "Gives us shade and oxygen", "visual": "ðŸŒ³", "color": "#2EB9DF"},
-                {"word": "à¤ªà¤¾à¤¨à¥€ (Water)", "phonics": "W-a-t-e-r", "meaning": "Essential liquid for life", "visual": "ðŸ’§", "color": "#EB3678"},
-                {"word": "à¤«à¥‚à¤² (Flower)", "phonics": "F-l-o-w-e-r", "meaning": "Colourful and fragrant", "visual": "ðŸŒ¸", "color": "#EC4899"}
+                {"word": "सूरज (Sun)", "phonics": "S-u-n", "meaning": "Bright star in sky", "visual": "☀️", "color": "#FB773C"},
+                {"word": "पेड़ (Tree)", "phonics": "T-r-e-e", "meaning": "Gives us shade and oxygen", "visual": "🌳", "color": "#2EB9DF"},
+                {"word": "पानी (Water)", "phonics": "W-a-t-e-r", "meaning": "Essential liquid for life", "visual": "💧", "color": "#EB3678"},
+                {"word": "फूल (Flower)", "phonics": "F-l-o-w-e-r", "meaning": "Colourful and fragrant", "visual": "🌸", "color": "#EC4899"}
             ]
         }
     else:  # WORKSHEET
         content = {
             "title": f"Grade {grade} Foundational Practice Worksheet",
             "tasks": [
-                {"task": "Match the count with the correct number of dots:", "items": ["3 -> â—�â—�â—�", "5 -> â—�â—�â—�â—�â—�", "2 -> â—�â—�"]},
+                {"task": "Match the count with the correct number of dots:", "items": ["3 -> ●●●", "5 -> ●●●●●", "2 -> ●●"]},
                 {"task": "Fill in the missing number: 10, 11, __, 13", "answer": "12"}
             ]
         }
@@ -312,5 +509,6 @@ def generate_nipun_content(transcript: str, grade: int, activity_type: str) -> D
         "domain": "Numeracy & Literacy",
         "skill": "Foundational Learning (NIPUN)",
         "content": content,
-        "generator": "Edge SLM (Qwen2.5/SmolLM2 prompt pipeline)"
+        "generator": "Edge SLM (SmolLM2-360M ONNX)",
+        "raw_slm_output": ai_generated_question
     }

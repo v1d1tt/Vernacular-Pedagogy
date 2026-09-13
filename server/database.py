@@ -20,6 +20,7 @@ def init_db():
         teaching_language TEXT NOT NULL,
         mode TEXT DEFAULT 'LECTURE',
         is_active INTEGER DEFAULT 1,
+        join_code TEXT DEFAULT '',
         created_at REAL NOT NULL
     )
     ''')
@@ -38,6 +39,12 @@ def init_db():
         FOREIGN KEY(session_id) REFERENCES sessions(id)
     )
     ''')
+
+    # Migrate: add join_code to sessions if it doesn't exist yet
+    try:
+        cursor.execute("ALTER TABLE sessions ADD COLUMN join_code TEXT DEFAULT ''")
+    except Exception:
+        pass  # Column already exists
 
     # Transcripts log table
     cursor.execute('''

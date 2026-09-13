@@ -1,6 +1,8 @@
 import uuid
 import time
 import json
+import random
+import string
 import hashlib
 from typing import Dict, Any, List, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Response
@@ -125,7 +127,12 @@ def transcribe_audio_endpoint(req: TranscribeRequest):
 def tts_speak(text: str = "", lang: str = "hi", speed: float = 1.0):
     if not text or not text.strip():
         raise HTTPException(status_code=400, detail="Text parameter is required")
-    wav_bytes = edge_ai.synthesize_speech(text.strip(), language=lang, speed=speed)
+    from ol_chiki import transliterate_ol_chiki_to_devanagari
+    clean_text = text.strip()
+    if lang == "sat" or any('\u1c50' <= ch <= '\u1c7f' for ch in clean_text):
+        lang = "hi"
+        clean_text = transliterate_ol_chiki_to_devanagari(clean_text)
+    wav_bytes = edge_ai.synthesize_speech(clean_text, language=lang, speed=speed)
     if not wav_bytes:
         raise HTTPException(status_code=500, detail="Speech synthesis failed or model not ready")
     return Response(content=wav_bytes, media_type="audio/wav")
@@ -249,17 +256,29 @@ def register_student(req: StudentRegisterRequest):
     }
 
 # Session Management
+def _generate_join_code() -> str:
+    """Generate a memorable 6-char alphanumeric join code (uppercase, no ambiguous chars)."""
+    chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # No I, O, 0, 1
+    return "".join(random.choices(chars, k=6))
+
 @app.post("/api/sessions")
 def create_session(req: CreateSessionRequest):
     session_id = str(uuid.uuid4())[:8]
+    join_code = _generate_join_code()
     now = time.time()
     
     conn = get_db_connection()
     cursor = conn.cursor()
+    # Ensure code is unique (retry if collision)
+    for _ in range(5):
+        cursor.execute("SELECT id FROM sessions WHERE join_code = ? AND is_active = 1", (join_code,))
+        if not cursor.fetchone():
+            break
+        join_code = _generate_join_code()
     cursor.execute('''
-    INSERT INTO sessions (id, teacher_id, teacher_name, course_name, grade, teaching_language, mode, is_active, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, 'LECTURE', 1, ?)
-    ''', (session_id, req.teacher_id, req.teacher_name, req.course_name, req.grade, req.teaching_language, now))
+    INSERT INTO sessions (id, teacher_id, teacher_name, course_name, grade, teaching_language, mode, is_active, join_code, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, 'LECTURE', 1, ?, ?)
+    ''', (session_id, req.teacher_id, req.teacher_name, req.course_name, req.grade, req.teaching_language, join_code, now))
     conn.commit()
     conn.close()
 
@@ -269,6 +288,7 @@ def create_session(req: CreateSessionRequest):
         "course_name": req.course_name,
         "grade": req.grade,
         "teaching_language": req.teaching_language,
+        "join_code": join_code,
         "mode": "LECTURE"
     }
 
@@ -282,6 +302,18 @@ def get_active_sessions():
     
     sessions = [dict(row) for row in rows]
     return {"sessions": sessions}
+
+@app.get("/api/sessions/by-code/{join_code}")
+def get_session_by_code(join_code: str):
+    """Lookup an active session by its 6-char join code (case-insensitive)."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM sessions WHERE UPPER(join_code) = ? AND is_active = 1", (join_code.strip().upper(),))
+    session = cursor.fetchone()
+    conn.close()
+    if not session:
+        raise HTTPException(status_code=404, detail="SESSION_NOT_FOUND")
+    return dict(session)
 
 @app.post("/api/sessions/{session_id}/join")
 def join_session(session_id: str, req: JoinSessionRequest):
@@ -319,7 +351,7 @@ async def broadcast_speech(req: BroadcastSpeechRequest):
     cursor = conn.cursor()
     cursor.execute("SELECT DISTINCT preferred_language FROM participants WHERE session_id = ?", (req.session_id,))
     rows = cursor.fetchall()
-    target_languages = list(set([row["preferred_language"] for row in rows] + [req.source_lang, "hi", "bn", "mr", "en"]))
+    target_languages = list(set([row["preferred_language"] for row in rows] + [req.source_lang, "hi", "bn", "mr", "en", "sat"]))
 
     # Perform Fan-Out Translation
     translation_result = translate_speech(req.original_text, req.source_lang, target_languages)
@@ -350,10 +382,11 @@ async def broadcast_speech(req: BroadcastSpeechRequest):
 
 # Raise Hand & Permissions
 @app.post("/api/sessions/{session_id}/raise-hand")
-async def raise_hand(session_id: str, participant_id: str):
+async def raise_hand(session_id: str, participant_id: str, raised: bool = True):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("UPDATE participants SET raised_hand = 1 WHERE id = ? AND session_id = ?", (participant_id, session_id))
+    val = 1 if raised else 0
+    cursor.execute("UPDATE participants SET raised_hand = ? WHERE id = ? AND session_id = ?", (val, participant_id, session_id))
     cursor.execute("SELECT * FROM participants WHERE id = ?", (participant_id,))
     p = cursor.fetchone()
     conn.commit()
@@ -364,10 +397,10 @@ async def raise_hand(session_id: str, participant_id: str):
             "type": "RAISE_HAND_UPDATED",
             "participant_id": participant_id,
             "student_name": p["student_name"],
-            "raised_hand": True
+            "raised_hand": raised
         }
         await manager.broadcast_to_session(session_id, event)
-        return {"status": "SUCCESS", "raised_hand": True}
+        return {"status": "SUCCESS", "raised_hand": raised}
     raise HTTPException(status_code=404, detail="Participant not found")
 
 @app.post("/api/sessions/{session_id}/approve-speaking")
@@ -395,7 +428,23 @@ async def approve_speaking(session_id: str, participant_id: str, allow: bool):
 # AI Content Generation & Teacher Approval Workflow
 @app.post("/api/content/generate")
 async def generate_content(req: GenerateContentRequest):
-    activity_data = generate_nipun_content(req.transcript_summary, req.grade, req.activity_type, lang=req.language or "hi")
+    # Fetch all transcripts from this session to build a rich lesson summary
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT original_text, source_lang FROM transcripts WHERE session_id = ? ORDER BY timestamp DESC LIMIT 20",
+        (req.session_id,)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+
+    # Build a combined lesson transcript from actual teacher speech
+    lesson_texts = [r["original_text"] for r in rows if r["source_lang"] != "STUDENT"]
+    if req.transcript_summary and req.transcript_summary.strip():
+        lesson_texts.insert(0, req.transcript_summary)
+    full_transcript = " ".join(lesson_texts[:10]) if lesson_texts else req.transcript_summary or "Foundational Learning"
+
+    activity_data = generate_nipun_content(full_transcript, req.grade, req.activity_type, lang=req.language or "hi")
     activity_id = str(uuid.uuid4())[:8]
     now = time.time()
 

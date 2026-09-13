@@ -161,6 +161,7 @@ export async function broadcastSpeech(data: {
         mr: "नमस्कार मुलांनो, আজ आपण गणितात नवीन गोष्टी शिकणार आहोत.",
         ta: "வணக்கம் குழந்தைகளே, இன்று நாம் கணிதத்தில் புதிய விஷயங்களைக் கற்றுக்கொள்வோம்.",
         te: "నమస్కారం పిల్లలు, ఈరోజు మనం గణితంలో కొత్త విషయాలు నేర్చుకుందాం.",
+        sat: "ᱡᱚᱦᱟᱨ ᱜᱤᱫᱽᱨᱟᱹ ᱠᱚ, ᱛᱮᱦᱮᱧ ᱟᱵᱚ ᱮᱞᱠᱷᱟ ᱨᱮ ᱱᱟᱣᱟ ᱡᱤᱱᱤᱥ ᱵᱚᱱ ᱪᱮᱫᱚᱜᱼᱟ ᱾",
         en: "Hello children, today we will learn new things in mathematics."
       },
       "Today we will learn addition in mathematics.": {
@@ -169,6 +170,7 @@ export async function broadcastSpeech(data: {
         mr: "आज आपण गणितात बेरीज शिकणार आहोत.",
         ta: "இன்று நாம் கணிதத்தில் கூட்டல் கற்போம்.",
         te: "ఈ రోజు మనం గణితంలో కూడిక నేర్చుకుందాం.",
+        sat: "ᱛᱮᱦᱮᱧ ᱟᱵᱚ ᱮᱞᱠᱷᱟ ᱨᱮ ᱡᱚᱲᱟᱣ ᱵᱚᱱ ᱪᱮᱫᱚᱜᱼᱟ ᱾",
         en: "Today we will learn addition in mathematics."
       }
     };
@@ -187,6 +189,7 @@ export async function broadcastSpeech(data: {
         mr: `[Marathi] ${data.original_text}`,
         ta: `[Tamil] ${data.original_text}`,
         te: `[Telugu] ${data.original_text}`,
+        sat: data.original_text,
         en: data.original_text
       },
       ttfa_seconds: 0.8,
@@ -340,13 +343,22 @@ export async function registerStudent(data: { name: string; grade: number; secti
 }
 
 export async function teacherSignup(data: { name: string; password: string; subject: string; grade: number; school_name: string; preferred_language: string }) {
-  const res = await fetch(`${getEdgeServerUrl()}/api/auth/teacher/signup`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data)
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${getEdgeServerUrl()}/api/auth/teacher/signup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data)
+    });
+  } catch {
+    throw new Error("SERVER_OFFLINE");
+  }
   if (res.status === 409) throw new Error("ACCOUNT_EXISTS");
-  if (!res.ok) throw new Error("Signup failed");
+  if (!res.ok) {
+    let detail = "Signup failed";
+    try { const j = await res.json(); detail = j.detail || detail; } catch {}
+    throw new Error(detail);
+  }
   return await res.json();
 }
 

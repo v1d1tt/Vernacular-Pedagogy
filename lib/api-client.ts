@@ -66,6 +66,16 @@ export interface SessionData {
   teaching_language: string;
   mode: string;
   is_active: number;
+  join_code?: string;
+}
+
+export async function getSessionByCode(joinCode: string): Promise<SessionData> {
+  const res = await fetch(`${getEdgeServerUrl()}/api/sessions/by-code/${encodeURIComponent(joinCode.trim().toUpperCase())}`);
+  if (!res.ok) {
+    if (res.status === 404) throw new Error("SESSION_NOT_FOUND");
+    throw new Error("Failed to lookup session by code");
+  }
+  return await res.json();
 }
 
 export async function fetchActiveSessions(): Promise<{ sessions: SessionData[] }> {
@@ -133,7 +143,7 @@ export async function joinSession(sessionId: string, data: {
       session_id: sessionId,
       student_name: data.student_name,
       preferred_language: data.preferred_language,
-      course_name: "Foundational Learning (Offline)",
+      course_name: "Mathematics",
       teaching_language: "hi"
     };
   }
@@ -203,6 +213,7 @@ export async function generateAiContent(data: {
   transcript_summary: string;
   grade: number;
   activity_type: string;
+  language?: string;
 }) {
   try {
     const res = await fetch(`${getEdgeServerUrl()}/api/content/generate`, {

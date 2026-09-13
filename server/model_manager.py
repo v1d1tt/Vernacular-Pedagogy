@@ -478,8 +478,8 @@ class EdgeModelManager:
         """
         Lazily loads the appropriate IndicTransONNX model instance.
         """
-        if direction in self._it2_models and self._it2_models[direction] is not None:
-            return True
+        if direction in self._it2_models:
+            return self._it2_models[direction] is not None
 
         from indictrans_onnx import IndicTransONNX
 
@@ -490,6 +490,7 @@ class EdgeModelManager:
         }
         source = model_sources.get(direction)
         if not source:
+            self._it2_models[direction] = None
             return False
 
         try:
@@ -502,6 +503,7 @@ class EdgeModelManager:
             return True
         except Exception as e:
             logger.error(f"Failed to load IndicTransONNX [{direction}]: {e}")
+            self._it2_models[direction] = None
             self._active_models[f"indictrans2_{direction}"] = f"ERROR: {e}"
             return False
 

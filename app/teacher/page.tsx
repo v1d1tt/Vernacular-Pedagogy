@@ -17,6 +17,7 @@ export interface SessionInfo {
   grade: number;
   teaching_language: string;
   mode: string;
+  join_code?: string;
 }
 export interface SpeechTranscript {
   speaker_name: string;
@@ -47,7 +48,7 @@ export default function TeacherConsole() {
   const [teacherName, setTeacherName] = useState("Mrs. Anita Sharma");
   const [teachingLang, setTeachingLang] = useState("en");
   const [grade, setGrade] = useState(2);
-  const [courseName] = useState("Foundational Mathematics");
+  const [courseName, setCourseName] = useState("Mathematics");
   const [activeSession, setActiveSession] = useState<SessionInfo | null>(null);
   const [speechText, setSpeechText] = useState("");
   const [transcripts, setTranscripts] = useState<SpeechTranscript[]>([]);
@@ -97,12 +98,12 @@ export default function TeacherConsole() {
 
     // Check voice command shortcuts
     const lower = text.toLowerCase();
-    if (lower.includes("generate quiz") || lower.includes("क्विज़ बनाएँ")) {
+    if (lower.includes("generate quiz") || lower.includes("क्विज़ बनाओ") || lower.includes("क्विज़")) {
       handleTriggerAiContent("QUIZ");
-    } else if (lower.includes("generate flashcard") || lower.includes("फ्लैशकार्ड बनाएँ")) {
+    } else if (lower.includes("flashcards") || lower.includes("फ्लैशकार्ड")) {
       handleTriggerAiContent("FLASHCARD");
-    } else if (lower.includes("mute all") || lower.includes("सबको म्यूट")) {
-      setRaiseHandQueue([]);
+    } else if (lower.includes("worksheet") || lower.includes("वर्कशीट")) {
+      handleTriggerAiContent("WORKSHEET");
     }
 
     const res = await broadcastSpeech({
@@ -112,8 +113,8 @@ export default function TeacherConsole() {
       original_text: text,
       source_lang: teachingLang,
     });
-    setTranscripts((prev) => [res as SpeechTranscript, ...prev]);
-    if (!textToSend) setSpeechText("");
+    setTranscripts((prev) => [res as unknown as SpeechTranscript, ...prev]);
+    setSpeechText("");
   };
 
   const handleToggleRecord = async () => {
@@ -121,25 +122,25 @@ export default function TeacherConsole() {
     if (isRecording) {
       setIsRecording(false);
       setIsTranscribing(true);
-      setMicStatus("Transcribing with Whisper AI (~84ms)...");
+      setMicStatus("Transcribing with Whisper AI...");
       try {
         const b64Pcm = await recorder.stop();
         if (b64Pcm) {
           const result = await transcribeAudio(b64Pcm, teachingLang);
           if (result && result.text) {
             setSpeechText(result.text);
-            setMicStatus(`Transcribed (${result.latency_seconds || 0.08}s): "${result.text}"`);
+            setMicStatus(`Transcribed: "${result.text}"`);
             await handleBroadcastSpeech(result.text);
           } else {
-            setMicStatus("No clear speech detected by VAD");
+            setMicStatus("No clear speech detected");
           }
         }
       } catch (err) {
         console.error("Mic recording error:", err);
-        setMicStatus("Microphone access error");
+        setMicStatus("Microphone error");
       } finally {
         setIsTranscribing(false);
-        setTimeout(() => setMicStatus(null), 4000);
+        setTimeout(() => setMicStatus(null), 3000);
       }
     } else {
       try {
@@ -149,7 +150,6 @@ export default function TeacherConsole() {
       } catch (err) {
         console.error("Mic start error:", err);
         setMicStatus("Could not access microphone");
-        setTimeout(() => setMicStatus(null), 3000);
       }
     }
   };
@@ -165,12 +165,18 @@ export default function TeacherConsole() {
   const handleTriggerAiContent = async (type: "QUIZ" | "FLASHCARD" | "WORKSHEET") => {
     if (!activeSession) return;
     setIsGenerating(true);
-    const summary = transcripts.slice(0, 3).map((t) => t.original_text).join(". ") || "Foundational Counting and Addition";
+    const langFallback: Record<string, string> = {
+      hi: `${courseName} - पाठ एवं अभ्यास`,
+      sat: `${courseName} - ᱥᱟᱛᱟᱢ ᱟᱨ ᱯᱟᱴ`,
+      en: `${courseName} Lesson & Practice`,
+    };
+    const summary = transcripts.map((t) => t.original_text).join(". ") || langFallback[teachingLang] || `${courseName} Lesson`;
     const res = await generateAiContent({
       session_id: activeSession.session_id,
       transcript_summary: summary,
       grade,
       activity_type: type,
+      language: teachingLang,
     });
     setPendingActivities((prev) => [res as ActivityItem, ...prev]);
     setIsGenerating(false);
@@ -234,13 +240,33 @@ export default function TeacherConsole() {
           </div>
 
           {activeSession ? (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[var(--green-tint)] text-[var(--green)] text-xs font-bold border border-[var(--green-tint)]">
-              <Radio className="w-3.5 h-3.5 animate-pulse" /> {t("live")}
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[var(--green-tint)] text-[var(--green)] text-xs font-bold border border-[var(--green-tint)]">
+                <Radio className="w-3.5 h-3.5 animate-pulse" /> {t("live")}
+              </div>
+              {activeSession.join_code && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[var(--brand)] text-[#0c1a2e] text-xs font-black tracking-widest shadow-sm">
+                  <span>🔑 CODE:</span>
+                  <span className="font-mono text-sm uppercase">{activeSession.join_code}</span>
+                </div>
+              )}
             </div>
           ) : (
-            <button onClick={handleStartSession} className="vs-btn-brand px-4 py-2 rounded-xl text-xs">
-              {t("startClassBtn")}
-            </button>
+            <div className="flex items-center gap-2">
+              <select
+                value={courseName}
+                onChange={(e) => setCourseName(e.target.value)}
+                className="vs-input px-3 py-1.5 rounded-xl text-xs font-bold border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-primary)] cursor-pointer"
+              >
+                <option value="Mathematics">📐 Mathematics (गणित / ᱮᱞᱠᱷᱟ)</option>
+                <option value="Literacy & Language">📚 Literacy & Language (साक्षरता / ᱚᱞ)</option>
+                <option value="EVS & Science">🌿 EVS & Science (पर्यावरण / ᱯᱚᱨᱤᱵᱮᱥ)</option>
+                <option value="General Knowledge">💡 General Knowledge (सामान्य ज्ञान)</option>
+              </select>
+              <button onClick={handleStartSession} className="vs-btn-brand px-4 py-2 rounded-xl text-xs">
+                {t("startClassBtn")}
+              </button>
+            </div>
           )}
           <LanguageSwitch />
           <ThemeToggle />
@@ -260,9 +286,16 @@ export default function TeacherConsole() {
               <h2 className="text-sm font-bold text-[var(--text-primary)]">{t("broadcastToClass")}</h2>
               {isRecording && <MicWaveform isSpeaking={true} className="ml-auto" />}
               {activeSession && (
-                <span className={`${isRecording ? "ml-2" : "ml-auto"} text-[10px] text-[var(--text-muted)] font-mono bg-[var(--surface-2)] px-2 py-0.5 rounded-full`}>
-                  ID: {activeSession.session_id}
-                </span>
+                <div className="ml-auto flex items-center gap-2">
+                  {activeSession.join_code && (
+                    <span className="text-xs text-[var(--brand-deep)] font-black bg-[var(--brand-tint)] px-2.5 py-0.5 rounded-full border border-[var(--brand-tint2)]">
+                      🔑 Code: {activeSession.join_code}
+                    </span>
+                  )}
+                  <span className="text-[10px] text-[var(--text-muted)] font-mono bg-[var(--surface-2)] px-2 py-0.5 rounded-full">
+                    ID: {activeSession.session_id}
+                  </span>
+                </div>
               )}
             </div>
             <div className="p-4 space-y-3">
@@ -463,40 +496,145 @@ export default function TeacherConsole() {
                     {t("needsReview")} ({pendingActivities.length})
                   </p>
                 )}
-                {pendingActivities.map((act) => (
-                  <div key={act.activity_id} className="rounded-xl border border-[var(--brand-tint2)] bg-[var(--brand-tint)] p-3.5 space-y-3">
-                    <div>
-                      <span className="text-[10px] font-bold text-[var(--brand-deep)] uppercase tracking-wider">{act.activity_type}</span>
-                      <p className="text-sm font-bold text-[var(--text-primary)] mt-0.5">{act.title}</p>
+                {pendingActivities.map((act) => {
+                  const content = (act.content || {}) as Record<string, unknown>;
+                  const questions = (content.questions || []) as Array<{ id: string; question: string; options?: string[]; correct?: string }>;
+                  const cards = (content.cards || []) as Array<{ word: string; phonics?: string; meaning?: string; visual?: string }>;
+                  const tasks = (content.tasks || []) as Array<{ task: string; answer?: string }>;
+
+                  return (
+                    <div key={act.activity_id} className="rounded-xl border border-[var(--brand-tint2)] bg-[var(--brand-tint)] p-3.5 space-y-3 shadow-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-black text-[var(--brand-deep)] uppercase tracking-wider bg-[var(--brand-tint2)] px-2 py-0.5 rounded-full">
+                          {act.activity_type}
+                        </span>
+                        <span className="text-[10px] text-[var(--text-muted)] font-medium">
+                          {t("needsReview")}
+                        </span>
+                      </div>
+
+                      <div>
+                        <p className="text-sm font-extrabold text-[var(--text-primary)] leading-snug">{act.title}</p>
+                      </div>
+
+                      {/* Detailed Questions / Content Preview */}
+                      <div className="space-y-2 pt-1 border-t border-[var(--brand-tint2)]">
+                        <p className="text-[10px] font-bold text-[var(--brand-deep)] uppercase tracking-wider">
+                          📋 {t("previewQuestions")}
+                        </p>
+
+                        {/* Quiz Questions */}
+                        {questions.length > 0 && (
+                          <div className="space-y-2">
+                            {questions.map((q, qIdx) => (
+                              <div key={q.id || qIdx} className="p-2.5 rounded-lg bg-[var(--surface-1)] border border-[var(--border)] text-xs space-y-1.5 shadow-2xs">
+                                <p className="font-bold text-[var(--text-primary)]">
+                                  <span className="text-[var(--brand-deep)] font-black mr-1">Q{qIdx + 1}:</span>
+                                  {q.question}
+                                </p>
+                                {q.options && (
+                                  <div className="flex flex-wrap gap-1.5 pt-0.5">
+                                    {q.options.map((opt, oIdx) => {
+                                      const isCorrect = opt === q.correct;
+                                      return (
+                                        <span
+                                          key={oIdx}
+                                          className={`px-2 py-0.5 rounded text-[11px] font-semibold border ${
+                                            isCorrect
+                                              ? "bg-[var(--green-tint)] text-[var(--green)] border-[var(--green-tint)] font-bold ring-1 ring-[var(--green)]"
+                                              : "bg-[var(--surface-2)] text-[var(--text-secondary)] border-[var(--border)]"
+                                          }`}
+                                        >
+                                          {opt} {isCorrect && "✓"}
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Flashcards */}
+                        {cards.length > 0 && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                            {cards.map((c, cIdx) => (
+                              <div key={cIdx} className="p-2 rounded-lg bg-[var(--surface-1)] border border-[var(--border)] text-xs flex items-center gap-2">
+                                <span className="text-base">{c.visual || "📚"}</span>
+                                <div className="overflow-hidden">
+                                  <p className="font-bold text-[var(--text-primary)] truncate">{c.word}</p>
+                                  {c.meaning && <p className="text-[10px] text-[var(--text-muted)] truncate">{c.meaning}</p>}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Worksheet tasks */}
+                        {tasks.length > 0 && (
+                          <div className="space-y-1.5">
+                            {tasks.map((tItem, tIdx) => (
+                              <div key={tIdx} className="p-2 rounded-lg bg-[var(--surface-1)] border border-[var(--border)] text-xs">
+                                <p className="font-medium text-[var(--text-primary)]">
+                                  <span className="font-bold text-[var(--brand-deep)] mr-1">{tIdx + 1}.</span>
+                                  {tItem.task}
+                                </p>
+                                {tItem.answer && (
+                                  <p className="text-[10px] text-[var(--green)] font-bold mt-0.5">
+                                    Answer: {tItem.answer}
+                                  </p>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex gap-2 pt-1">
+                        <button
+                          onClick={() => handleApproveActivity(act.activity_id, true)}
+                          className="vs-btn-brand flex-1 py-2.5 rounded-lg text-xs font-extrabold flex items-center justify-center gap-1 shadow-md"
+                        >
+                          {t("approveAndSend")} <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleApproveActivity(act.activity_id, false)}
+                          className="px-3.5 py-2.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-secondary)] font-bold text-xs transition hover:opacity-80"
+                        >
+                          {t("discard")}
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => handleApproveActivity(act.activity_id, true)}
-                        className="vs-btn-brand flex-1 py-2 rounded-lg text-xs flex items-center justify-center gap-1"
-                      >
-                        {t("approveAndSend")} <ChevronRight className="w-3 h-3" />
-                      </button>
-                      <button
-                        onClick={() => handleApproveActivity(act.activity_id, false)}
-                        className="px-3 py-2 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-secondary)] font-bold text-xs transition hover:opacity-80"
-                      >
-                        {t("discard")}
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
 
                 {publishedActivities.length > 0 && (
                   <>
                     <p className="text-[11px] font-bold text-[var(--green)] uppercase tracking-widest pt-2">
                       {t("sentToClass")} ({publishedActivities.length})
                     </p>
-                    {publishedActivities.map((pa) => (
-                      <div key={pa.activity_id} className="p-3 rounded-xl bg-[var(--green-tint)] border border-[var(--green-tint)] flex items-center justify-between">
-                        <span className="text-xs font-bold text-[var(--green)]">{pa.title}</span>
-                        <span className="text-[10px] font-black text-[var(--green)] bg-[var(--surface)] px-2 py-0.5 rounded-full">LIVE</span>
-                      </div>
-                    ))}
+                    {publishedActivities.map((pa) => {
+                      const pContent = (pa.content || {}) as Record<string, unknown>;
+                      const pQuestions = (pContent.questions || []) as Array<{ id: string; question: string; options?: string[]; correct?: string }>;
+                      return (
+                        <div key={pa.activity_id} className="p-3.5 rounded-xl bg-[var(--green-tint)] border border-[var(--green-tint)] space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-[var(--green)]">{pa.title}</span>
+                            <span className="text-[10px] font-black text-[var(--green)] bg-[var(--surface)] px-2 py-0.5 rounded-full">LIVE</span>
+                          </div>
+                          {pQuestions.length > 0 && (
+                            <div className="space-y-1 pt-1 border-t border-[var(--green-tint)]/40">
+                              {pQuestions.map((q, qIdx) => (
+                                <p key={qIdx} className="text-[11px] font-medium text-[var(--text-primary)]">
+                                  <span className="font-bold text-[var(--green)] mr-1">Q{qIdx + 1}:</span> {q.question}
+                                </p>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </>
                 )}
 

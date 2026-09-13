@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { fetchActiveSessions, joinSession, connectWebSocket, transcribeAudio, broadcastSpeech, detectActiveEdgeServer, getEdgeServerUrl, fetchPublishedActivities } from "@/lib/api-client";
+import { fetchActiveSessions, joinSession, connectWebSocket, transcribeAudio, broadcastSpeech, detectActiveEdgeServer, getEdgeServerUrl, fetchPublishedActivities, getSessionByCode } from "@/lib/api-client";
 import { AudioRecorder } from "@/lib/audio-recorder";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LanguageSwitch } from "@/components/language-switch";
@@ -23,7 +23,19 @@ export interface StudentActivity {
       question: string;
       visual?: string;
       options: string[];
-      correct_answer: string;
+      correct?: string;
+      correct_answer?: string;
+    }>;
+    cards?: Array<{
+      word: string;
+      phonics?: string;
+      meaning?: string;
+      visual?: string;
+      color?: string;
+    }>;
+    tasks?: Array<{
+      task: string;
+      answer?: string;
     }>;
   };
 }
@@ -89,8 +101,7 @@ export default function StudentConsole() {
   const [grade, setGrade] = useState(2);
   const [participantId] = useState("P-" + Math.floor(Math.random() * 1000));
   const [joinedSession, setJoinedSession] = useState<{ session_id: string } | null>(null);
-  const [activeTab, setActiveTab] = useState<"LISTEN" | "QUIZ" | "FLASHCARDS" | "GAMES">("LISTEN");
-  const [selectedSubject, setSelectedSubject] = useState<"MATHS" | "EVS" | "HINDI" | "ENGLISH">("MATHS");
+  const [activeTab, setActiveTab] = useState<"LISTEN" | "QUIZ" | "WORKSHEET" | "FLASHCARDS" | "GAMES">("LISTEN");
   const [gameScore, setGameScore] = useState<number>(0);
   const [activeGameIndex, setActiveGameIndex] = useState<number>(0);
 
@@ -125,7 +136,8 @@ export default function StudentConsole() {
   const [recorder] = useState(() => (typeof window !== "undefined" ? new AudioRecorder() : null));
   const [activities, setActivities] = useState<StudentActivity[]>([]);
   const [selectedAnswers, setSelectedAnswers] = useState<Record<string, string>>({});
-  const [quizScore, setQuizScore] = useState<number | null>(null);
+  const [worksheetAnswers, setWorksheetAnswers] = useState<Record<string, Record<number, string>>>({});
+  const [submittedScores, setSubmittedScores] = useState<Record<string, number>>({});
 
   const handleSelectStudentLang = (code: string, name: string) => {
     setStudentLang(code);
@@ -137,13 +149,13 @@ export default function StudentConsole() {
     } catch {}
 
     const initialGreetings: Record<string, string> = {
-      hi: "नमस्ते बच्चों, आज हम गणित में नई चीज़ें सीखेंगे।",
-      en: "Hello children, today we will learn new things in mathematics.",
-      bn: "নমস্কার বাচ্চারা, আজ আমরা গণিতে নতুন কিছু শিখব।",
-      mr: "नमस्कार मुलांनो, आज आपण गणितात नवीन गोष्टी शिकणार आहोत.",
-      ta: "வணக்கம் குழந்தைகளே, இன்று நாம் கணிதத்தில் புதிய விஷயங்களைக் கற்றுக்கொள்வோம்.",
-      te: "నమస్కారం పిల్లలు, ఈరోజు మనం గణితంలో కొత్త విషయాలు నేర్చుకుందాం.",
-      sat: "ᱡᱚᱦᱟᱨ ᱜᱤᱫᱽᱨᱟᱹ ᱠᱚ, ᱛᱮᱦᱮᱧ ᱟᱵᱚ ᱮᱞᱠᱷᱟ ᱨᱮ ᱱᱟᱣᱟ ᱡᱤᱱᱤᱥ ᱵᱚᱱ ᱪᱮᱫᱚᱜᱼᱟ ᱾",
+      hi: "नमस्ते बच्चों, आज हम कक्षा में नई चीज़ें सीखेंगे।",
+      en: "Hello children, today we will learn new things in class.",
+      bn: "নমস্কার বাচ্চারা, আজ আমরা ক্লাসে নতুন কিছু শিখব।",
+      mr: "नमस्कार मुलांनो, आज आपण वर्गात नवीन गोष्टी शिकणार आहोत.",
+      ta: "வணக்கம் குழந்தைகளே, இன்று நாம் வகுப்பில் புதிய விஷயங்களைக் கற்றுக்கொள்வோம்.",
+      te: "నమస్కారం పిల్లలు, ఈరోజు మనం తరగతిలో కొత్త విషయాలు నేర్చుకుందాం.",
+      sat: "ᱡᱚᱦᱟᱨ ᱜᱤᱫᱽᱨᱟᱹ, ᱛᱮᱦᱮᱧ ᱟᱵᱚ ᱪᱟᱱᱚᱪ ᱨᱮ ᱱᱟᱶᱟ ᱡᱤᱱᱤᱥ ᱵᱚᱱ ᱪᱮᱫᱚᱜᱼᱟ᱾",
     };
     if (initialGreetings[code]) {
       setTranslatedSpeech(initialGreetings[code]);
@@ -333,31 +345,7 @@ export default function StudentConsole() {
       console.warn("Neural TTS fallback failed:", err);
     }
 
-    // 5. Ultimate fallback: Web Audio synthesized tone melody
-    if (typeof window !== "undefined") {
-      try {
-        const win = window as WindowWithAudio;
-        const AudioCtx = win.AudioContext || win.webkitAudioContext;
-        if (AudioCtx) {
-          const ctx = win._audioCtx || new AudioCtx();
-          win._audioCtx = ctx;
-          if (ctx.state === "suspended") ctx.resume();
-
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.type = "sine";
-          osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
-          osc.frequency.exponentialRampToValueAtTime(659.25, ctx.currentTime + 0.15); // E5
-          gain.gain.setValueAtTime(0.2, ctx.currentTime);
-          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
-          osc.connect(gain);
-          gain.connect(ctx.destination);
-          osc.start();
-          osc.stop(ctx.currentTime + 0.3);
-        }
-      } catch {}
-    }
-
+    // 5. Ultimate fallback: reset state gracefully without tone beep
     setIsPlayingAudio(false);
   }, [studentLang, isPlayingAudio, stopAudio]);
 
@@ -390,24 +378,44 @@ export default function StudentConsole() {
       if (joinedSessionRef.current) return;
       try {
         await detectActiveEdgeServer();
-        const res = await fetchActiveSessions();
-        const activeList = res?.sessions || [];
-        if (activeList.length > 0) {
-          const session = activeList[0];
-          await joinSession(session.id, {
+        const savedCode = localStorage.getItem("user_class_code");
+        const savedSessionId = localStorage.getItem("user_joined_session_id");
+        let targetSessionId = "";
+
+        if (savedSessionId) {
+          targetSessionId = savedSessionId;
+        } else if (savedCode) {
+          try {
+            const sess = await getSessionByCode(savedCode);
+            if (sess && sess.id) targetSessionId = sess.id;
+          } catch (e) {
+            console.warn("Class code lookup failed:", e);
+          }
+        }
+
+        if (!targetSessionId) {
+          const res = await fetchActiveSessions();
+          const activeList = res?.sessions || [];
+          if (activeList.length > 0) {
+            targetSessionId = activeList[0].id;
+          }
+        }
+
+        if (targetSessionId) {
+          await joinSession(targetSessionId, {
             student_id: participantId,
             student_name: s || "Aarav",
             preferred_language: l || "hi",
           });
-          setJoinedSession({ session_id: session.id });
+          setJoinedSession({ session_id: targetSessionId });
 
-          fetchPublishedActivities(session.id).then((res) => {
+          fetchPublishedActivities(targetSessionId).then((res) => {
             if (res && res.activities && res.activities.length > 0) {
               setActivities(res.activities as StudentActivity[]);
             }
           });
 
-          connectWebSocket(session.id, (msg) => {
+          connectWebSocket(targetSessionId, (msg) => {
             if (msg.type === "SPEECH_TRANSLATED") {
               const origText = (msg.original_text as string) || "";
               const srcLang = (msg.source_lang as string) || "en";
@@ -511,7 +519,8 @@ export default function StudentConsole() {
   const tabs = [
     { id: "LISTEN" as const, label: t("tabListen"), icon: <Volume2 className="w-4 h-4" /> },
     { id: "QUIZ" as const, label: t("tabQuiz"), icon: <HelpCircle className="w-4 h-4" /> },
-    { id: "FLASHCARDS" as const, label: t("tabCards"), icon: <BookOpen className="w-4 h-4" /> },
+    { id: "WORKSHEET" as const, label: t("tabWorksheet"), icon: <BookOpen className="w-4 h-4" /> },
+    { id: "FLASHCARDS" as const, label: t("tabCards"), icon: <Award className="w-4 h-4" /> },
     { id: "GAMES" as const, label: "FLN Games 🎮", icon: <Award className="w-4 h-4" /> },
   ];
 
@@ -598,33 +607,16 @@ export default function StudentConsole() {
               }`}
             >
               {tab.icon} {tab.label}
-              {tab.id === "QUIZ" && activities.length > 0 && (
+              {tab.id === "QUIZ" && activities.filter((a) => a.activity_type === "QUIZ" || Boolean(a.content?.questions && a.content.questions.length > 0)).length > 0 && (
                 <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-[var(--red)] text-white text-[9px] font-black flex items-center justify-center">
-                  {activities.length}
+                  {activities.filter((a) => a.activity_type === "QUIZ" || Boolean(a.content?.questions && a.content.questions.length > 0)).length}
                 </span>
               )}
-            </button>
-          ))}
-        </div>
-
-        {/* Subject Channels */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
-          {[
-            { id: "MATHS" as const, label: "Mathematics 📐", tint: "bg-[var(--brand-tint)] text-[var(--brand-deep)] border-[var(--brand-tint2)]" },
-            { id: "EVS" as const, label: "EVS / Science 🌿", tint: "bg-[var(--green-tint)] text-[var(--green)] border-[var(--green-tint)]" },
-            { id: "HINDI" as const, label: "Hindi 📚", tint: "bg-[var(--amber-tint)] text-[var(--amber)] border-[var(--amber-tint)]" },
-            { id: "ENGLISH" as const, label: "English 🔤", tint: "bg-[var(--violet-tint)] text-[var(--violet)] border-[var(--violet-tint)]" },
-          ].map((sub) => (
-            <button
-              key={sub.id}
-              onClick={() => setSelectedSubject(sub.id)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap border transition ${
-                selectedSubject === sub.id
-                  ? `${sub.tint} shadow-sm ring-2 ring-[var(--brand)]`
-                  : "bg-[var(--surface-2)] text-[var(--text-muted)] border-[var(--border)] hover:text-[var(--text-primary)]"
-              }`}
-            >
-              {sub.label}
+              {tab.id === "WORKSHEET" && activities.filter((a) => a.activity_type === "WORKSHEET" || Boolean((a.content as Record<string, unknown>)?.tasks)).length > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-[var(--brand)] text-[#0c1a2e] text-[9px] font-black flex items-center justify-center">
+                  {activities.filter((a) => a.activity_type === "WORKSHEET" || Boolean((a.content as Record<string, unknown>)?.tasks)).length}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -748,92 +740,243 @@ export default function StudentConsole() {
         {/* QUIZ */}
         {activeTab === "QUIZ" && (
           <div className="space-y-4">
-            {activities.length === 0 ? (
-              <div className="vs-surface rounded-2xl p-10 text-center space-y-4">
-                <div className="w-14 h-14 rounded-2xl bg-[var(--brand-tint)] flex items-center justify-center mx-auto">
-                  <HelpCircle className="w-7 h-7 text-[var(--brand)]" />
-                </div>
-                <div>
-                  <p className="text-sm font-bold text-[var(--text-secondary)]">{t("noQuizYet")}</p>
-                  <p className="text-xs text-[var(--text-muted)] mt-1">{t("noQuizYetSub")}</p>
-                </div>
-              </div>
-            ) : (
-              activities.map((act, idx) => (
-                <div key={idx} className="vs-surface rounded-2xl overflow-hidden">
-                  <div className="px-5 py-3.5 border-b border-[var(--border-sub)] flex items-center justify-between bg-[var(--brand-tint)]">
-                    <h2 className="text-sm font-bold text-[var(--brand-deep)]">{act.title}</h2>
-                    <span className="text-[10px] font-bold text-[var(--brand-deep)] bg-[var(--surface)] px-2.5 py-1 rounded-full border border-[var(--brand-tint2)]">{act.domain}</span>
+            {(() => {
+              const quizList = activities.filter((a) => a.activity_type === "QUIZ" || Boolean(a.content?.questions && a.content.questions.length > 0));
+              if (quizList.length === 0) {
+                return (
+                  <div className="vs-surface rounded-2xl p-10 text-center space-y-4">
+                    <div className="w-14 h-14 rounded-2xl bg-[var(--brand-tint)] flex items-center justify-center mx-auto">
+                      <HelpCircle className="w-7 h-7 text-[var(--brand)]" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold text-[var(--text-secondary)]">{t("noQuizYet")}</p>
+                      <p className="text-xs text-[var(--text-muted)] mt-1">{t("noQuizYetSub")}</p>
+                    </div>
                   </div>
-                  <div className="p-4 space-y-4">
-                    {act.content?.questions?.map((q) => (
-                      <div key={q.id} className="space-y-3">
-                        <p className="text-base font-bold text-[var(--text-primary)]">{q.question}</p>
-                        {q.visual === "COUNTING_APPLES" && (
-                          <div className="flex items-center justify-center gap-3 text-4xl py-3 bg-[var(--surface-2)] rounded-xl border border-[var(--border)]">
-                            🍎 🍎 🍎
-                          </div>
-                        )}
-                        <div className="grid grid-cols-2 gap-2.5">
-                          {q.options.map((opt) => (
-                            <button
-                              key={opt}
-                              onClick={() => setSelectedAnswers((prev) => ({ ...prev, [q.id]: opt }))}
-                              className={`p-4 rounded-xl font-bold text-sm text-center transition border-2 ${
-                                selectedAnswers[q.id] === opt
-                                  ? "border-[var(--brand)] bg-[var(--brand)] text-[#0c1a2e] shadow-sm"
-                                  : "border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-primary)] hover:border-[var(--brand)]"
-                              }`}
-                            >
-                              {opt}
-                            </button>
-                          ))}
+                );
+              }
+              return quizList.map((act, idx) => {
+                const questions = act.content?.questions || [];
+                const isSubmitted = submittedScores[act.activity_id] !== undefined;
+                const scoreVal = submittedScores[act.activity_id] || 0;
+
+                const handleScoreThisQuiz = () => {
+                  let correctCount = 0;
+                  questions.forEach((q) => {
+                    const userAns = (selectedAnswers[q.id] || "").trim().toLowerCase();
+                    const correctAns = (q.correct || q.correct_answer || "").trim().toLowerCase();
+                    if (userAns && correctAns && userAns === correctAns) {
+                      correctCount++;
+                    }
+                  });
+                  const pct = questions.length > 0 ? Math.round((correctCount / questions.length) * 100) : 100;
+                  setSubmittedScores((prev) => ({ ...prev, [act.activity_id]: pct }));
+                };
+
+                return (
+                  <div key={act.activity_id || idx} className="vs-surface rounded-2xl overflow-hidden shadow-sm border border-[var(--border)]">
+                    <div className="px-5 py-3.5 border-b border-[var(--border-sub)] flex items-center justify-between bg-[var(--brand-tint)]">
+                      <h2 className="text-sm font-bold text-[var(--brand-deep)]">{act.title}</h2>
+                      <span className="text-[10px] font-bold text-[var(--brand-deep)] bg-[var(--surface)] px-2.5 py-1 rounded-full border border-[var(--brand-tint2)]">{act.domain || "Quiz"}</span>
+                    </div>
+                    <div className="p-4 space-y-4">
+                      {questions.map((q) => (
+                        <div key={q.id} className="space-y-3 p-3.5 rounded-xl bg-[var(--surface-1)] border border-[var(--border)]">
+                          <p className="text-sm font-bold text-[var(--text-primary)]">{q.question}</p>
+                          {q.visual === "COUNTING_APPLES" && (
+                            <div className="flex items-center justify-center gap-3 text-3xl py-2 bg-[var(--surface-2)] rounded-xl border border-[var(--border)]">
+                              🍎 🍎 🍎
+                            </div>
+                          )}
+                          {q.options && (
+                            <div className="grid grid-cols-2 gap-2">
+                              {q.options.map((opt) => (
+                                <button
+                                  key={opt}
+                                  disabled={isSubmitted}
+                                  onClick={() => setSelectedAnswers((prev) => ({ ...prev, [q.id]: opt }))}
+                                  className={`p-3 rounded-xl font-bold text-xs text-center transition border-2 ${
+                                    selectedAnswers[q.id] === opt
+                                      ? "border-[var(--brand)] bg-[var(--brand)] text-[#0c1a2e] shadow-sm"
+                                      : "border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-primary)] hover:border-[var(--brand)]"
+                                  }`}
+                                >
+                                  {opt}
+                                </button>
+                              ))}
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    ))}
-                    {quizScore ? (
-                      <div className="p-5 rounded-xl bg-[var(--green-tint)] border border-[var(--green-tint)] text-center space-y-2">
-                        <Award className="w-10 h-10 text-[var(--green)] mx-auto" />
-                        <p className="text-base font-black text-[var(--green)]">{t("wellDoneTitle")}</p>
-                        <p className="text-xs text-[var(--green)] font-semibold">{t("wellDoneSub")}</p>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => setQuizScore(100)}
-                        className="w-full py-3.5 rounded-xl bg-[var(--green)] hover:opacity-90 text-white font-bold text-sm shadow-sm transition flex items-center justify-center gap-2"
-                      >
-                        {t("submitAnswers")} <CheckCircle2 className="w-4 h-4" />
-                      </button>
-                    )}
+                      ))}
+
+                      {isSubmitted ? (
+                        <div className="p-4 rounded-xl bg-[var(--green-tint)] border border-[var(--green-tint)] text-center space-y-1 animate-fadeIn">
+                          <Award className="w-8 h-8 text-[var(--green)] mx-auto" />
+                          <p className="text-base font-black text-[var(--green)]">{t("wellDoneTitle")}</p>
+                          <p className="text-xs text-[var(--green)] font-semibold">
+                            Score: {scoreVal}% ({t("wellDoneSub")})
+                          </p>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={handleScoreThisQuiz}
+                          disabled={questions.some((q) => !selectedAnswers[q.id])}
+                          className="w-full py-3.5 rounded-xl bg-[var(--green)] hover:opacity-90 disabled:opacity-50 text-white font-bold text-sm shadow-sm transition flex items-center justify-center gap-2"
+                        >
+                          {t("submitAnswers")} <CheckCircle2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))
-            )}
+                );
+              });
+            })()}
+          </div>
+        )}
+
+        {/* WORKSHEET */}
+        {activeTab === "WORKSHEET" && (
+          <div className="space-y-4">
+            {(() => {
+              const worksheetList = activities.filter((a) => a.activity_type === "WORKSHEET" || Boolean((a.content as Record<string, unknown>)?.tasks));
+              if (worksheetList.length === 0) {
+                return (
+                  <div className="vs-surface rounded-2xl p-10 text-center space-y-4">
+                    <div className="w-14 h-14 rounded-2xl bg-[var(--brand-tint)] flex items-center justify-center mx-auto">
+                      <BookOpen className="w-7 h-7 text-[var(--brand)]" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold text-[var(--text-secondary)]">No Worksheet Available</p>
+                      <p className="text-xs text-[var(--text-muted)] mt-1">Worksheets assigned by your teacher will appear here.</p>
+                    </div>
+                  </div>
+                );
+              }
+              return worksheetList.map((act, idx) => {
+                const tasks = (((act.content as Record<string, unknown>)?.tasks as unknown[]) || []) as Array<{ task: string; answer?: string }>;
+                const isSubmitted = submittedScores[act.activity_id] !== undefined;
+
+                const handleSubmitWorksheet = () => {
+                  setSubmittedScores((prev) => ({ ...prev, [act.activity_id]: 100 }));
+                };
+
+                return (
+                  <div key={act.activity_id || idx} className="vs-surface rounded-2xl overflow-hidden shadow-sm border border-[var(--border)] space-y-4">
+                    <div className="px-5 py-3.5 border-b border-[var(--border-sub)] flex items-center justify-between bg-[var(--brand-tint)]">
+                      <h2 className="text-sm font-bold text-[var(--brand-deep)]">{act.title}</h2>
+                      <span className="text-[10px] font-bold text-[var(--brand-deep)] bg-[var(--surface)] px-2.5 py-1 rounded-full border border-[var(--brand-tint2)]">Worksheet</span>
+                    </div>
+                    <div className="p-4 space-y-4">
+                      {tasks.map((tItem, tIdx) => (
+                        <div key={tIdx} className="space-y-2 p-3.5 rounded-xl bg-[var(--surface-1)] border border-[var(--border)]">
+                          <p className="text-xs font-bold text-[var(--text-primary)]">
+                            <span className="text-[var(--brand-deep)] font-extrabold mr-1.5">{tIdx + 1}.</span>
+                            {tItem.task}
+                          </p>
+                          <textarea
+                            disabled={isSubmitted}
+                            value={worksheetAnswers[act.activity_id]?.[tIdx] || ""}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setWorksheetAnswers((prev) => ({
+                                ...prev,
+                                [act.activity_id]: {
+                                  ...(prev[act.activity_id] || {}),
+                                  [tIdx]: val,
+                                },
+                              }));
+                            }}
+                            placeholder="Type your answer here..."
+                            rows={2}
+                            className="vs-input w-full px-3 py-2 rounded-xl text-xs font-medium resize-none disabled:opacity-60"
+                          />
+                        </div>
+                      ))}
+
+                      {isSubmitted ? (
+                        <div className="p-4 rounded-xl bg-[var(--green-tint)] border border-[var(--green-tint)] text-center space-y-1 animate-fadeIn">
+                          <Award className="w-8 h-8 text-[var(--green)] mx-auto" />
+                          <p className="text-base font-black text-[var(--green)]">Worksheet Submitted! ⭐</p>
+                          <p className="text-xs text-[var(--green)] font-semibold">Your responses have been recorded by the teacher.</p>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={handleSubmitWorksheet}
+                          className="w-full py-3.5 rounded-xl bg-[var(--green)] hover:opacity-90 text-white font-bold text-sm shadow-sm transition flex items-center justify-center gap-2"
+                        >
+                          Submit Worksheet <CheckCircle2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              });
+            })()}
           </div>
         )}
 
         {/* FLASHCARDS */}
         {activeTab === "FLASHCARDS" && (
-          <div className="grid grid-cols-2 gap-3">
-            {(FLASHCARDS_DATA[studentLang] || FLASHCARDS_DATA["hi"]).map((card, i) => (
-              <div key={i} className="vs-surface rounded-2xl overflow-hidden shadow-sm">
-                <div className="flex items-center justify-center text-5xl py-7" style={{ backgroundColor: `color-mix(in srgb, ${card.tint} 60%, transparent)` }}>
-                  {card.visual}
+          <div className="space-y-4">
+            {(() => {
+              const serverCards = activities.filter((a) => a.activity_type === "FLASHCARD" || Boolean((a.content as Record<string, unknown>)?.cards));
+              if (serverCards.length > 0) {
+                return serverCards.map((act, idx) => {
+                  const cards = (((act.content as Record<string, unknown>)?.cards as unknown[]) || []) as Array<{ word: string; meaning?: string; phonics?: string; visual?: string; color?: string }>;
+                  return (
+                    <div key={act.activity_id || idx} className="space-y-3">
+                      <h2 className="text-sm font-bold text-[var(--text-primary)]">{act.title}</h2>
+                      <div className="grid grid-cols-2 gap-3">
+                        {cards.map((c, cIdx) => (
+                          <div key={cIdx} className="vs-surface rounded-2xl overflow-hidden shadow-sm border border-[var(--border)]">
+                            <div className="flex items-center justify-center text-5xl py-6" style={{ backgroundColor: c.color ? `color-mix(in srgb, ${c.color} 25%, transparent)` : "var(--brand-tint)" }}>
+                              {c.visual || "📚"}
+                            </div>
+                            <div className="p-4 space-y-1">
+                              <p className="text-lg font-black text-[var(--text-primary)]">{c.word}</p>
+                              {c.phonics && <p className="text-xs font-bold text-[var(--brand-deep)] uppercase tracking-wider">{c.phonics}</p>}
+                              {c.meaning && <p className="text-[11px] text-[var(--text-secondary)]">{c.meaning}</p>}
+                              <button
+                                type="button"
+                                onClick={() => playSyntheticAudio(c.word, studentLang)}
+                                className="mt-2 w-full py-2.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--brand)] text-[var(--text-secondary)] hover:text-[var(--brand-deep)] font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95"
+                              >
+                                <Volume2 className="w-3.5 h-3.5" /> {t("pronounce")}
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                });
+              }
+
+              // Fallback to static flashcards
+              return (
+                <div className="grid grid-cols-2 gap-3">
+                  {(FLASHCARDS_DATA[studentLang] || FLASHCARDS_DATA["hi"]).map((card, i) => (
+                    <div key={i} className="vs-surface rounded-2xl overflow-hidden shadow-sm">
+                      <div className="flex items-center justify-center text-5xl py-7" style={{ backgroundColor: `color-mix(in srgb, ${card.tint} 60%, transparent)` }}>
+                        {card.visual}
+                      </div>
+                      <div className="p-4 space-y-1">
+                        <p className="text-xl font-black text-[var(--text-primary)]">{card.word}</p>
+                        <p className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">{card.eng}</p>
+                        <p className="text-[11px] text-[var(--text-secondary)]">{card.desc}</p>
+                        <button
+                          type="button"
+                          onClick={() => playSyntheticAudio(card.word, studentLang)}
+                          className="mt-2 w-full py-2.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--brand)] text-[var(--text-secondary)] hover:text-[var(--brand-deep)] font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95"
+                        >
+                          <Volume2 className="w-3.5 h-3.5" /> {t("pronounce")}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                <div className="p-4 space-y-1">
-                  <p className="text-xl font-black text-[var(--text-primary)]">{card.word}</p>
-                  <p className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">{card.eng}</p>
-                  <p className="text-[11px] text-[var(--text-secondary)]">{card.desc}</p>
-                  <button
-                    type="button"
-                    onClick={() => playSyntheticAudio(card.word, studentLang)}
-                    className="mt-2 w-full py-2.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--brand)] text-[var(--text-secondary)] hover:text-[var(--brand-deep)] font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95"
-                  >
-                    <Volume2 className="w-3.5 h-3.5" /> {t("pronounce")}
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })()}
           </div>
         )}
 
@@ -844,7 +987,9 @@ export default function StudentConsole() {
               <div>
                 <div className="flex items-center gap-2">
                   <Award className="w-5 h-5 text-[var(--brand-deep)]" />
-                  <h3 className="text-sm font-bold text-[var(--brand-deep)]">NIPUN Foundational FLN Hub</h3>
+                  <h3 className="text-sm font-bold text-[var(--brand-deep)]">
+                    {studentLang === "sat" ? "ᱱᱤᱯᱩᱱ ᱵᱷᱟᱨᱚᱛ ᱜᱤᱫᱽᱨᱟᱹ ᱪᱮᱫᱚᱜ ᱴᱷᱟᱶ" : studentLang === "hi" ? "निपुण भारत बाल-शिक्षा केंद्र" : "NIPUN FLN Learning Hub"}
+                  </h3>
                 </div>
                 <p className="text-xs text-[var(--text-secondary)] mt-0.5">
                   Interactive audio games for Class {grade} · Language: <span className="font-bold">{studentLangName}</span>
@@ -859,7 +1004,7 @@ export default function StudentConsole() {
             <div className="vs-surface rounded-2xl p-6 text-center space-y-5">
               <div className="flex items-center justify-between text-xs text-[var(--text-muted)] font-bold uppercase tracking-wider">
                 <span>Game {activeGameIndex + 1} of 3</span>
-                <span>Subject: {selectedSubject}</span>
+                <span>Classroom Activity</span>
               </div>
 
               {activeGameIndex === 0 && (

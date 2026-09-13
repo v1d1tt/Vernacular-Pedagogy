@@ -247,76 +247,259 @@ def translate_speech(original_text: str, source_lang: str, target_languages: Lis
         "edge_runtime": "ONNX Runtime (CPU/XNNPACK)"
     }
 
+MULTILINGUAL_STOP_WORDS = {
+    # English
+    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did", "will", "would", "shall",
+    "should", "may", "might", "must", "can", "could", "this", "that",
+    "these", "those", "i", "we", "you", "he", "she", "it", "they", "them",
+    "our", "your", "his", "her", "its", "their", "what", "which", "who",
+    "whom", "when", "where", "why", "how", "all", "each", "every", "both",
+    "few", "more", "most", "other", "some", "such", "no", "nor", "not",
+    "only", "same", "so", "than", "too", "very", "just", "and", "but",
+    "or", "for", "of", "in", "on", "to", "at", "by", "from", "with",
+    "about", "into", "through", "during", "before", "after", "above",
+    "below", "up", "down", "out", "off", "over", "under", "again",
+    "then", "once", "here", "there", "today", "learn", "learning",
+    "will", "class", "grade", "children", "students", "let", "us",
+    "hello", "namaste", "today", "about", "lesson", "topic",
+    # Hindi
+    "आज", "हम", "आप", "तुम", "मैं", "यह", "वह", "ये", "वे", "इस", "उस",
+    "में", "को", "का", "की", "के", "से", "पर", "तक", "द्वारा", "ने",
+    "है", "हैं", "था", "थी", "थे", "होगा", "होगी", "होंगे", "होना",
+    "और", "तथा", "या", "अथवा", "लेकिन", "किंतु", "परंतु", "भी", "ही", "नहीं",
+    "नमस्ते", "बच्चों", "बच्चे", "क्लास", "पाठ", "सीखेंगे", "सीखना", "करेंगे",
+    "करो", "करें", "कहो", "बताओ", "चलो", "दीजिये", "लीजिये", "विषय",
+    # Santali (Ol Chiki)
+    "ᱛᱮᱦᱮᱧ", "ᱟᱵᱚ", "ᱤᱧ", "ᱟᱢ", "ᱩᱱᱤ", "ᱚᱱᱟ", "ᱱᱚᱣᱟ", "ᱨᱮ", "ᱨᱮᱱᱟᱜ", "ᱠᱷᱚᱱ",
+    "ᱵᱚᱱ", "ᱜᱤᱫᱽᱨᱟᱹ", "ᱡᱚᱦᱟᱨ", "ᱦᱩᱭᱩᱜᱼᱟ", "ᱪᱮᱫᱚᱜᱼᱟ", "ᱢᱮᱱᱟᱜᱼᱟ", "ᱞᱟᱹᱭ", "ᱢᱮ", "ᱯᱟᱴ"
+}
+
+TEMPLATE_LEXICON = {
+    # Titles & Stems
+    "Quiz": {"hi": "प्रश्नोत्तरी (क्विज़)", "sat": "ᱠᱩᱠᱞᱤ ᱯᱟᱴ", "en": "Quiz"},
+    "Vocabulary": {"hi": "शब्दावली", "sat": "ᱟᱹᱲᱟᱹ ᱜᱽᱭᱟᱱ", "en": "Vocabulary"},
+    "Worksheet": {"hi": "कार्यपत्रक", "sat": "ᱠᱟᱹᱢᱤ ᱯᱟᱴ", "en": "Worksheet"},
+    "Game": {"hi": "खेल गतिविधियाँ", "sat": "ᱮᱱᱮᱡ ᱠᱟᱹᱢᱤ", "en": "Interactive Game"},
+
+    # Questions
+    "Which main concept was taught in today's lesson?": {
+        "hi": "आज के पाठ में मुख्य अवधारणा क्या सिखाई गई?",
+        "sat": "ᱛᱮᱦᱮᱧᱟᱜ ᱯᱟᱴ ᱨᱮ ᱪᱮᱫ ᱢᱩᱬᱩᱛ ᱡᱤᱱᱤᱥ ᱵᱚᱱ ᱪᱮᱫᱮᱱᱟ?",
+        "en": "Which main concept was taught in today's lesson?"
+    },
+    "How many letters are in the word?": {
+        "hi": "शब्द में कितने अक्षर हैं?",
+        "sat": "ᱟᱹᱲᱟᱹ ᱨᱮ ᱛᱤᱱᱟᱹᱜ ᱟᱠᱷᱚᱨ ᱢᱮᱱᱟᱜᱼᱟ?",
+        "en": "How many letters are in the word?"
+    },
+    "Count and choose: 🌟🌟🌟 = ?": {
+        "hi": "गिनें और चुनें: 🌟🌟🌟 = ?",
+        "sat": "ᱞᱮᱠᱷᱟᱭ ᱢᱮ ᱟᱨ ᱵᱟᱪᱷᱟᱣ ᱢᱮ: 🌟🌟🌟 = ?",
+        "en": "Count and choose: 🌟🌟🌟 = ?"
+    },
+    "In today's lesson, how many main ideas were shared?": {
+        "hi": "आज के पाठ में कितने मुख्य विचार साझा किए गए?",
+        "sat": "ᱛᱮᱦᱮᱧᱟᱜ ᱯᱟᱴ ᱨᱮ ᱛᱤᱱᱟᱹᱜ ᱢᱩᱬᱩᱛ ᱠᱟᱛᱷᱟ ᱞᱟᱹᱭᱮᱱᱟ?",
+        "en": "In today's lesson, how many main ideas were shared?"
+    },
+    "What is 6 + 4?": {
+        "hi": "6 + 4 का मान क्या है?",
+        "sat": "᱖ + ᱔ ᱛᱤᱱᱟᱹᱜ ᱦᱩᱭᱩᱜᱼᱟ?",
+        "en": "What is 6 + 4?"
+    },
+    "What is 3 × 4?": {
+        "hi": "3 × 4 का मान क्या है?",
+        "sat": "᱓ × ᱔ ᱛᱤᱱᱟᱹᱜ ᱦᱩᱭᱩᱜᱼᱟ?",
+        "en": "What is 3 × 4?"
+    },
+    "Which word best describes the lesson topic?": {
+        "hi": "पाठ के विषय का सबसे अच्छा वर्णन कौन सा शब्द करता है?",
+        "sat": "ᱯᱟᱴ ᱨᱮᱱᱟᱜ ᱥᱟᱛᱟᱢ ᱚᱠᱟ ᱟᱹᱲᱟᱹ ᱥᱟᱹᱨᱤ ᱞᱟᱹᱭᱮᱫᱼᱟ?",
+        "en": "Which word best describes the lesson topic?"
+    },
+
+    # Worksheet Tasks
+    "Write 2 sentences about today's topic from class.": {
+        "hi": "आज की कक्षा के विषय के बारे में 2 वाक्य लिखें।",
+        "sat": "ᱛᱮᱦᱮᱧᱟᱜ ᱪᱟᱱᱚᱪ ᱨᱮᱱᱟᱜ ᱥᱟᱛᱟᱢ ᱵᱟᱵᱚᱛ ᱛᱮ ᱒ ᱴᱟᱝ ᱠᱟᱛᱷᱟ ᱚᱞ ᱢᱮ᱾",
+        "en": "Write 2 sentences about today's topic from class."
+    },
+    "Draw or describe what the main concept means.": {
+        "hi": "मुख्य अवधारणा का क्या अर्थ है, चित्र बनाएं या वर्णन करें।",
+        "sat": "ᱢᱩᱬᱩᱛ ᱠᱟᱛᱷᱟ ᱨᱮᱱᱟᱜ ᱢᱮᱱᱮᱛ ᱪᱮᱫ ᱠᱟᱱᱟ, ᱪᱤᱛᱟᱹᱨ ᱵᱮᱱᱟᱣ ᱢᱮ ᱥᱮ ᱞᱟᱹᱭ ᱢᱮ᱾",
+        "en": "Draw or describe what the main concept means."
+    },
+    "Fill in the blank: Today I learned about ______": {
+        "hi": "रिक्त स्थान भरें: आज मैंने ______ के बारे में सीखा।",
+        "sat": "ᱯᱮᱨᱮᱡ ᱢᱮ: ᱛᱮᱦᱮᱧ ᱤᱧ ______ ᱵᱟᱵᱚᱛ ᱛᱤᱧ ᱪᱮᱫᱮᱱᱟ᱾",
+        "en": "Fill in the blank: Today I learned about ______"
+    },
+
+    # Flashcards
+    "A key concept from today's lesson": {
+        "hi": "आज के पाठ की एक मुख्य अवधारणा",
+        "sat": "ᱛᱮᱦᱮᱧᱟᱜ ᱯᱟᱴ ᱨᱮᱱᱟᱜ ᱢᱤᱫ ᱢᱩᱬᱩᱛ ᱠᱟᱛᱷᱟ",
+        "en": "A key concept from today's lesson"
+    },
+    "Today's Topic": {
+        "hi": "आज का विषय",
+        "sat": "ᱛᱮᱦᱮᱧᱟᱜ ᱥᱟᱛᱟᱢ",
+        "en": "Today's Topic"
+    },
+    "Learning": {
+        "hi": "अधिगम (सीखना)",
+        "sat": "ᱪᱮᱫᱚᱜ",
+        "en": "Learning"
+    },
+    "Practice": {
+        "hi": "अभ्यास",
+        "sat": "ᱢᱩᱦᱤᱛ ᱚᱞ",
+        "en": "Practice"
+    }
+}
+
+
+def translate_activity_item(text: str, target_lang: str) -> str:
+    """Translates text items into target student language."""
+    if not text or target_lang == "en":
+        return text
+    clean = text.strip()
+    if clean in TEMPLATE_LEXICON and target_lang in TEMPLATE_LEXICON[clean]:
+        return TEMPLATE_LEXICON[clean][target_lang]
+    if clean in CLASSROOM_LEXICON and target_lang in CLASSROOM_LEXICON[clean]:
+        return CLASSROOM_LEXICON[clean][target_lang]
+
+    # Try neural MT
+    try:
+        translated = edge_ai.translate_indic(clean, src_lang="en", tgt_lang=target_lang)
+        if translated and translated.strip() and not translated.startswith("["):
+            return translated.strip()
+    except Exception as e:
+        logger.warning(f"MT activity translate failed: {e}")
+
+    return clean
+
+
 def _extract_keywords(transcript: str) -> list:
     """
-    Extract meaningful keywords from a lesson transcript.
-    Simple frequency-based approach — no extra dependencies.
+    Extract meaningful keywords from a lesson transcript (supports Multilingual/Unicode).
     """
     import re
-    # Normalise: lowercase, strip punctuation
-    text = re.sub(r"[^\w\s]", " ", transcript.lower())
-    words = text.split()
+    if not transcript or not transcript.strip():
+        return []
 
-    # Stop words to ignore
-    stop_words = {
-        "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
-        "have", "has", "had", "do", "does", "did", "will", "would", "shall",
-        "should", "may", "might", "must", "can", "could", "this", "that",
-        "these", "those", "i", "we", "you", "he", "she", "it", "they", "them",
-        "our", "your", "his", "her", "its", "their", "what", "which", "who",
-        "whom", "when", "where", "why", "how", "all", "each", "every", "both",
-        "few", "more", "most", "other", "some", "such", "no", "nor", "not",
-        "only", "same", "so", "than", "too", "very", "just", "and", "but",
-        "or", "for", "of", "in", "on", "to", "at", "by", "from", "with",
-        "about", "into", "through", "during", "before", "after", "above",
-        "below", "up", "down", "out", "off", "over", "under", "again",
-        "then", "once", "here", "there", "today", "learn", "learning",
-        "will", "class", "grade", "children", "students", "let", "us",
-        "hello", "namaste", "hum", "aaj", "mein", "hai", "hain", "ke",
-        "ka", "ki", "ko", "se", "ne", "par", "ye", "jo", "bhi", "nahi"
-    }
+    # Clean punctuation preserving Devanagari/Ol Chiki word characters
+    clean_text = re.sub(r"[^\w\s]", " ", transcript)
+    words = clean_text.split()
 
     freq: dict = {}
     for w in words:
-        if len(w) > 2 and w not in stop_words:
-            freq[w] = freq.get(w, 0) + 1
+        w_clean = w.strip()
+        w_lower = w_clean.lower()
+        if len(w_clean) >= 2 and w_lower not in MULTILINGUAL_STOP_WORDS and not w_clean.isdigit():
+            freq[w_clean] = freq.get(w_clean, 0) + 1
 
-    # Sort by frequency, return top 10
     sorted_kw = sorted(freq.items(), key=lambda x: x[1], reverse=True)
-    return [k for k, _ in sorted_kw[:10]]
+    extracted = [k for k, _ in sorted_kw[:10]]
+    return extracted
 
 
-def _build_quiz_from_transcript(transcript: str, grade: int, slm_question: str) -> dict:
+def _build_quiz_from_transcript(transcript: str, grade: int, slm_question: str, lang: str = "hi") -> dict:
     """Build contextually relevant quiz questions from lesson transcript keywords."""
     keywords = _extract_keywords(transcript)
-    topic = keywords[0].capitalize() if keywords else "Counting"
-    topic2 = keywords[1].capitalize() if len(keywords) > 1 else "Numbers"
 
-    # Use SLM-generated question as Q1 if available, else build from keywords
-    q1_text = slm_question if slm_question else f"Which of these is related to '{topic}'?"
-    q1_options = [topic, topic2, "Sky", "Book"]
-    q1_correct = topic
+    # Contextual fallbacks based on grade if transcript is short
+    default_topics = {
+        1: ["Addition", "Counting", "Numbers", "Apples"],
+        2: ["Subtraction", "Sentences", "Mathematics", "Reading"],
+        3: ["Multiplication", "Shapes", "Problem Solving", "Vocabulary"]
+    }
+    fallback_list = default_topics.get(grade, ["Addition", "Numbers"])
 
-    # Numeracy questions based on grade
+    topic_raw = keywords[0] if keywords else fallback_list[0]
+    topic2_raw = keywords[1] if len(keywords) > 1 else fallback_list[1]
+
+    # Translate topic labels into target language
+    topic = translate_activity_item(topic_raw, lang)
+    topic2 = translate_activity_item(topic2_raw, lang)
+    opt_geo = translate_activity_item("Geography", lang)
+    opt_hist = translate_activity_item("History", lang)
+
+    # Validate SLM output to discard off-topic hallucinations
+    is_valid_slm = False
+    if slm_question and len(slm_question.strip()) > 10:
+        low_q = slm_question.lower()
+        off_topic_words = [
+            "france", "capital", "paris", "president", "washington", "country",
+            "scholarship", "scholarships", "election", "government", "minister", "prime minister"
+        ]
+        if not any(w in low_q for w in off_topic_words):
+            if any(k.lower() in low_q for k in keywords) or any(w in low_q for w in ["what", "how", "count", "add", "many"]):
+                is_valid_slm = True
+
+    if is_valid_slm:
+        q1_text = translate_activity_item(slm_question.strip(), lang)
+        q1_options = [topic, topic2, opt_geo, opt_hist]
+        q1_correct = topic
+    else:
+        if lang == "hi":
+            q1_text = f"आज के पाठ में '{topic}' के बारे में कौन सी मुख्य अवधारणा सिखाई गई?"
+        elif lang == "sat":
+            q1_text = f"ᱛᱮᱦᱮᱧᱟᱜ ᱯᱟᱴ ᱨᱮ '{topic}' ᱵᱟᱵᱚᱛ ᱛᱮ ᱪᱮᱫ ᱢᱩᱬᱩᱛ ᱡᱤᱱᱤᱥ ᱵᱚᱱ ᱪᱮᱫᱮᱱᱟ?"
+        else:
+            q1_text = f"Which main concept was taught in today's lesson on '{topic}'?"
+        q1_options = [topic, topic2, opt_geo, opt_hist]
+        q1_correct = topic
+
+    # Grade specific questions
     if grade == 1:
-        q2_text = f"How many letters are in the word '{topic}'?"
+        if lang == "hi":
+            q2_text = f"शब्द '{topic}' में कितने अक्षर/ध्वनियाँ हैं?"
+            q3_text = "गिनें और सही संख्या चुनें: 🌟🌟🌟 = ?"
+        elif lang == "sat":
+            q2_text = f"'{topic}' ᱟᱹᱲᱟᱹ ᱨᱮ ᱛᱤᱱᱟᱹᱜ ᱟᱠᱷᱚᱨ ᱢᱮᱱᱟᱜᱼᱟ?"
+            q3_text = "ᱞᱮᱠᱷᱟᱭ ᱢᱮ ᱟᱨ ᱵᱟᱪᱷᱟᱣ ᱢᱮ: 🌟🌟🌟 = ?"
+        else:
+            q2_text = f"How many letters are in the word '{topic}'?"
+            q3_text = "Count and choose: 🌟🌟🌟 = ?"
+
         q2_options = [str(max(1, len(topic)-1)), str(len(topic)), str(len(topic)+1), str(len(topic)+2)]
         q2_correct = str(len(topic))
-        q3_text = "Count and choose: 🌟🌟🌟 = ?"
         q3_options = ["2", "3", "4", "5"]
         q3_correct = "3"
+
     elif grade == 2:
-        q2_text = f"In today's lesson about '{topic}', how many main ideas did the teacher share?"
+        if lang == "hi":
+            q2_text = f"आज के '{topic}' पाठ में शिक्षक ने कितने मुख्य विचार साझा किए?"
+            q3_text = "गणित समस्या: 6 + 4 का सही उत्तर क्या है?"
+        elif lang == "sat":
+            q2_text = f"ᱛᱮᱦᱮᱧᱟᱜ '{topic}' ᱯᱟᱴ ᱨᱮ ᱛᱤᱱᱟᱹᱜ ᱢᱩᱬᱩᱛ ᱠᱟᱛᱷᱟ ᱞᱟᱹᱭᱮᱱᱟ?"
+            q3_text = "ᱮᱞᱠᱷᱟ ᱠᱩᱠᱞᱤ: ᱖ + ᱔ ᱛᱤᱱᱟᱹᱜ ᱦᱩᱭᱩᱜᱼᱟ?"
+        else:
+            q2_text = f"In today's lesson about '{topic}', how many main ideas were shared?"
+            q3_text = "What is 6 + 4?"
+
         q2_options = ["1", "2", "3", "4"]
         q2_correct = "2"
-        q3_text = "What is 6 + 4?"
         q3_options = ["8", "9", "10", "11"]
         q3_correct = "10"
+
     else:
-        q2_text = f"Which word best describes '{topic}' from today's lesson?"
-        q2_options = [topic2, "Shape", "Number", topic]
+        if lang == "hi":
+            q2_text = f"आज के पाठ से कौन सा शब्द '{topic}' का सबसे अच्छा वर्णन करता है?"
+            q3_text = "गुणन समस्या: 3 × 4 का सही उत्तर क्या है?"
+        elif lang == "sat":
+            q2_text = f"ᱛᱮᱦᱮᱧᱟᱜ ᱯᱟᱴ ᱠᱷᱚᱱ ᱚᱠᱟ ᱟᱹᱲᱟᱹ '{topic}' ᱨᱮᱱᱟᱜ ᱥᱟᱹᱨᱤ ᱩᱯᱨᱩᱢ ᱠᱟᱱᱟ?"
+            q3_text = "ᱜᱩᱬᱟᱹ ᱠᱩᱠᱞᱤ: ᱓ × ᱔ ᱛᱤᱱᱟᱹᱜ ᱦᱩᱭᱩᱜᱼᱟ?"
+        else:
+            q2_text = f"Which word best describes '{topic}' from today's lesson?"
+            q3_text = "What is 3 × 4?"
+
+        opt_num = translate_activity_item("Number", lang)
+        opt_shp = translate_activity_item("Shape", lang)
+        q2_options = [topic2, opt_shp, opt_num, topic]
         q2_correct = topic
-        q3_text = "What is 3 × 4?"
         q3_options = ["10", "12", "14", "16"]
         q3_correct = "12"
 
@@ -348,38 +531,101 @@ def _build_quiz_from_transcript(transcript: str, grade: int, slm_question: str) 
     }
 
 
-def _build_flashcards_from_transcript(transcript: str, grade: int) -> list:
+def _build_flashcards_from_transcript(transcript: str, grade: int, lang: str = "hi") -> list:
     """Build flashcards from lesson vocabulary keywords."""
     keywords = _extract_keywords(transcript)
     VISUALS = ["📚", "🌟", "🎯", "🔢", "📐", "🌿", "💡", "🎨", "🔤", "🌍"]
     COLORS = ["#FB773C", "#2EB9DF", "#EB3678", "#EC4899", "#22c55e", "#8b5cf6", "#f59e0b", "#06b6d4"]
 
+    meaning_text = translate_activity_item("A key concept from today's lesson", lang)
+
     cards = []
     for i, kw in enumerate(keywords[:6]):
+        translated_word = translate_activity_item(kw, lang)
         cards.append({
-            "word": kw.capitalize(),
-            "phonics": "-".join(kw.upper()[:4]) if len(kw) >= 2 else kw.upper(),
-            "meaning": f"A key concept from today's lesson",
+            "word": translated_word,
+            "phonics": "-".join(translated_word[:4]),
+            "meaning": meaning_text,
             "visual": VISUALS[i % len(VISUALS)],
             "color": COLORS[i % len(COLORS)]
         })
 
-    # Ensure at least 3 cards
     if not cards:
+        w1 = translate_activity_item("Today's Topic", lang)
+        w2 = translate_activity_item("Learning", lang)
+        w3 = translate_activity_item("Practice", lang)
         cards = [
-            {"word": "Today's Topic", "phonics": "T-O-P-I-C", "meaning": "The subject of today's class", "visual": "📚", "color": "#FB773C"},
-            {"word": "Learning", "phonics": "L-E-A-R-N", "meaning": "Gaining new knowledge", "visual": "🌟", "color": "#2EB9DF"},
-            {"word": "Practice", "phonics": "P-R-A-C-T", "meaning": "Repeating to get better", "visual": "🎯", "color": "#EC4899"},
+            {"word": w1, "phonics": "-".join(w1[:4]), "meaning": translate_activity_item("The main subject taught today", lang), "visual": "📚", "color": "#FB773C"},
+            {"word": w2, "phonics": "-".join(w2[:4]), "meaning": translate_activity_item("Gaining new knowledge and skills", lang), "visual": "🌟", "color": "#2EB9DF"},
+            {"word": w3, "phonics": "-".join(w3[:4]), "meaning": translate_activity_item("Repeating exercises to improve understanding", lang), "visual": "🎯", "color": "#EC4899"},
         ]
     return cards
+
+
+def _build_worksheet_from_transcript(transcript: str, grade: int, lang: str = "hi") -> list:
+    """Build interactive worksheet tasks based on transcript."""
+    keywords = _extract_keywords(transcript)
+    kw1_raw = keywords[0] if keywords else "Topic"
+    kw2_raw = keywords[1] if len(keywords) > 1 else "Concept"
+
+    kw1 = translate_activity_item(kw1_raw, lang)
+    kw2 = translate_activity_item(kw2_raw, lang)
+
+    if lang == "hi":
+        t1 = f"आज की कक्षा से '{kw1}' के बारे में 2 वाक्य लिखें।"
+        t2 = f"'{kw2}' का क्या अर्थ है, चित्र बनाएं या वर्णन करें।"
+        t3 = f"रिक्त स्थान भरें: आज मैंने '{kw1}' के बारे में सीखा।"
+    elif lang == "sat":
+        t1 = f"ᱛᱮᱦᱮᱧᱟᱜ ᱪᱟᱱᱚᱪ ᱠᱷᱚᱱ '{kw1}' ᱵᱟᱵᱚᱛ ᱛᱮ ᱒ ᱴᱟᱝ ᱠᱟᱛᱷᱟ ᱚᱞ ᱢᱮ᱾"
+        t2 = f"'{kw2}' ᱨᱮᱱᱟᱜ ᱢᱮᱱᱮᱛ ᱪᱮᱫ ᱠᱟᱱᱟ, ᱪᱤᱛᱟᱹᱨ ᱵᱮᱱᱟᱣ ᱢᱮ ᱥᱮ ᱞᱟᱹᱭ ᱢᱮ᱾"
+        t3 = f"ᱯᱮᱨᱮᱡ ᱢᱮ: ᱛᱮᱦᱮᱧ ᱤᱧ '{kw1}' ᱵᱟᱵᱚᱛ ᱛᱤᱧ ᱪᱮᱫᱮᱱᱟ᱾"
+    else:
+        t1 = f"Write 2 sentences about '{kw1}' from today's class."
+        t2 = f"Draw or describe what '{kw2}' means."
+        t3 = f"Fill in the blank: Today I learned about '{kw1}'."
+
+    return [
+        {"task": t1, "answer": ""},
+        {"task": t2, "answer": ""},
+        {"task": t3, "answer": kw1}
+    ]
+
+
+def _build_game_from_transcript(transcript: str, grade: int, lang: str = "hi") -> list:
+    """Build interactive audio-visual FLN games."""
+    keywords = _extract_keywords(transcript)
+    kw1_raw = keywords[0] if keywords else "Apples"
+    kw1 = translate_activity_item(kw1_raw, lang)
+
+    if lang == "hi":
+        g1_title = f"गिनती खेल: {kw1} कितने हैं?"
+        g1_instr = f"चित्र में दिख रहे {kw1} को गिनें और सही विकल्प चुनें!"
+    elif lang == "sat":
+        g1_title = f"ᱞᱮᱠᱷᱟ ᱮᱱᱮᱡ: ᱛᱤᱱᱟᱹᱜ {kw1} ᱢᱮᱱᱟᱜᱼᱟ?"
+        g1_instr = f"ᱪᱤᱛᱟᱹᱨ ᱨᱮ ᱛᱤᱱᱟᱹᱜ {kw1} ᱢᱮᱱᱟᱜᱼᱟ ᱞᱮᱠᱷᱟᱭ ᱢᱮ!"
+    else:
+        g1_title = f"Count Apples Game: How many {kw1}?"
+        g1_instr = f"Count the {kw1} in the image and tap the correct number!"
+
+    return [
+        {
+            "id": "game1",
+            "title": g1_title,
+            "instruction": g1_instr,
+            "visual": "🍎 🍎 🍎 🍎",
+            "count": 4,
+            "options": ["2", "3", "4", "5"],
+            "correct": "4"
+        }
+    ]
 
 
 def generate_nipun_content(transcript: str, grade: int, activity_type: str, lang: str = "hi") -> Dict[str, Any]:
     """
     Generates NIPUN FLN educational activities based on the actual lesson transcript.
-    Uses keyword extraction + SmolLM2-360M for contextual question generation.
+    Fully localized in target student language (Hindi, Santali Ol Chiki, etc.).
     """
-    logger.info(f"Generating {activity_type} for Grade {grade} FLN from transcript ({len(transcript)} chars).")
+    logger.info(f"Generating {activity_type} for Grade {grade} FLN (Lang: {lang}) from transcript ({len(transcript)} chars).")
 
     # Run on-demand SLM inference for question generation
     ai_generated_question = ""
@@ -393,122 +639,67 @@ def generate_nipun_content(transcript: str, grade: int, activity_type: str, lang
             logger.warning(f"SmolLM2 generation error: {e}")
 
     keywords = _extract_keywords(clean_summary)
-    topic = keywords[0].capitalize() if keywords else "Lesson"
+    topic_raw = keywords[0] if keywords else "Lesson"
+    topic = translate_activity_item(topic_raw, lang)
 
     if activity_type == "QUIZ":
-        quiz_data = _build_quiz_from_transcript(clean_summary, grade, ai_generated_question)
+        quiz_data = _build_quiz_from_transcript(clean_summary, grade, ai_generated_question, lang=lang)
+        quiz_title = translate_activity_item("Quiz", lang)
         content = {
-            "title": f"Grade {grade} Quiz: {topic}",
+            "title": f"Grade {grade} {quiz_title}: {topic}",
             **quiz_data
         }
     elif activity_type == "FLASHCARD":
-        cards = _build_flashcards_from_transcript(clean_summary, grade)
+        cards = _build_flashcards_from_transcript(clean_summary, grade, lang=lang)
+        vocab_title = translate_activity_item("Vocabulary", lang)
         content = {
-            "title": f"Grade {grade} Vocabulary: {topic}",
+            "title": f"Grade {grade} {vocab_title}: {topic}",
             "cards": cards
         }
-    else:  # WORKSHEET
-        kw1 = keywords[0].capitalize() if keywords else "Topic"
-        kw2 = keywords[1].capitalize() if len(keywords) > 1 else "Concept"
+    elif activity_type in ["GAME", "GAMES"]:
+        games = _build_game_from_transcript(clean_summary, grade, lang=lang)
+        game_title = translate_activity_item("Game", lang)
         content = {
-            "title": f"Grade {grade} Worksheet: {topic}",
-            "tasks": [
-                {"task": f"Write 2 sentences about '{kw1}' from today's class.", "answer": ""},
-                {"task": f"Draw or describe what '{kw2}' means.", "answer": ""},
-                {"task": "Fill in the blank: Today I learned about ______.", "answer": topic}
-            ]
+            "title": f"Grade {grade} {game_title}: {topic}",
+            "games": games
+        }
+    else:  # WORKSHEET
+        tasks = _build_worksheet_from_transcript(clean_summary, grade, lang=lang)
+        sheet_title = translate_activity_item("Worksheet", lang)
+        content = {
+            "title": f"Grade {grade} {sheet_title}: {topic}",
+            "tasks": tasks
         }
 
     # Swap back to ASR/MT pipeline
     edge_ai.unload_slm()
 
+    domain_names = {
+        "hi": "गणित एवं भाषा कौशल",
+        "sat": "ᱮᱞᱠᱷᱟ ᱟᱨ ᱟᱹᱲᱟᱹ ᱜᱽᱭᱟᱱ",
+        "bn": "গণিত ও ভাষা দক্ষতা",
+        "mr": "गणित व भाषा कौशल्य",
+        "en": "Numeracy & Literacy"
+    }
+    skill_names = {
+        "hi": "निपुण भारत बाल-शिक्षा",
+        "sat": "ᱱᱤᱯᱩᱱ ᱵᱷᱟᱨᱚᱛ ᱢᱩᱬᱩᱛ ᱪᱮᱫᱚᱜ",
+        "bn": "নিপুণ ভারত প্রাথমিক শিক্ষা",
+        "mr": "निपुण भारत प्राथमिक शिक्षण",
+        "en": "NIPUN Primary Learning"
+    }
+
     return {
         "activity_type": activity_type,
         "grade": grade,
-        "domain": "Numeracy & Literacy",
-        "skill": "Foundational Learning (NIPUN)",
+        "domain": domain_names.get(lang, "Numeracy & Literacy"),
+        "skill": skill_names.get(lang, "NIPUN Primary Learning"),
         "content": content,
-        "generator": "Edge SLM (SmolLM2-360M) + Keyword Extraction",
+        "generator": "Edge SLM (SmolLM2-360M) + Multilingual Keyword Extraction",
         "raw_slm_output": ai_generated_question,
-        "lesson_keywords": keywords[:5]
+        "lesson_keywords": keywords[:5],
+        "language": lang
     }
 
-    """
-    Generates NIPUN FLN educational activities with asynchronous memory swapping.
-    Runs real SmolLM2-360M inference on-demand.
-    """
-    logger.info(f"Generating {activity_type} for Grade {grade} FLN curriculum.")
 
-    # Run real on-demand SLM inference using SmolLM2-360M
-    ai_generated_question = ""
-    clean_summary = transcript.strip() if transcript else ""
-    if clean_summary:
-        try:
-            slm_prompt = f"Create 1 simple question for Grade {grade} students based on this lesson: {clean_summary[:120]}"
-            ai_generated_question = edge_ai.generate_with_slm(slm_prompt, max_new_tokens=40)
-            logger.info(f"SmolLM2 generated activity question: '{ai_generated_question}'")
-        except Exception as e:
-            logger.warning(f"SmolLM2 generation error: {e}")
 
-    if activity_type == "QUIZ":
-        q1_text = ai_generated_question if ai_generated_question else "How many apples are shown below? 🍎 🍎 🍎"
-        content = {
-            "title": f"Grade {grade} NIPUN Quick Quiz",
-            "questions": [
-                {
-                    "id": "q1",
-                    "question": q1_text,
-                    "options": ["2", "3", "4", "5"],
-                    "correct": "3",
-                    "visual": "COUNTING_APPLES",
-                    "count": 3
-                },
-                {
-                    "id": "q2",
-                    "question": "What is 4 + 2?",
-                    "options": ["5", "6", "7", "8"],
-                    "correct": "6",
-                    "visual": "NUMBER_LINE",
-                    "start": 4,
-                    "jump": 2
-                },
-                {
-                    "id": "q3",
-                    "question": "Which of these is a Circle?",
-                    "options": ["Triangle", "Circle", "Square"],
-                    "correct": "Circle",
-                    "visual": "SHAPES"
-                }
-            ]
-        }
-    elif activity_type == "FLASHCARD":
-        content = {
-            "title": f"Grade {grade} Vocabulary & Phonics Flashcards",
-            "cards": [
-                {"word": "सूरज (Sun)", "phonics": "S-u-n", "meaning": "Bright star in sky", "visual": "☀️", "color": "#FB773C"},
-                {"word": "पेड़ (Tree)", "phonics": "T-r-e-e", "meaning": "Gives us shade and oxygen", "visual": "🌳", "color": "#2EB9DF"},
-                {"word": "पानी (Water)", "phonics": "W-a-t-e-r", "meaning": "Essential liquid for life", "visual": "💧", "color": "#EB3678"},
-                {"word": "फूल (Flower)", "phonics": "F-l-o-w-e-r", "meaning": "Colourful and fragrant", "visual": "🌸", "color": "#EC4899"}
-            ]
-        }
-    else:  # WORKSHEET
-        content = {
-            "title": f"Grade {grade} Foundational Practice Worksheet",
-            "tasks": [
-                {"task": "Match the count with the correct number of dots:", "items": ["3 -> ●●●", "5 -> ●●●●●", "2 -> ●●"]},
-                {"task": "Fill in the missing number: 10, 11, __, 13", "answer": "12"}
-            ]
-        }
-
-    # Swapping back to ASR/MT pipeline
-    edge_ai.unload_slm()
-
-    return {
-        "activity_type": activity_type,
-        "grade": grade,
-        "domain": "Numeracy & Literacy",
-        "skill": "Foundational Learning (NIPUN)",
-        "content": content,
-        "generator": "Edge SLM (SmolLM2-360M ONNX)",
-        "raw_slm_output": ai_generated_question
-    }

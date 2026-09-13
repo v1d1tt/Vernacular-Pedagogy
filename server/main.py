@@ -436,15 +436,33 @@ async def generate_content(req: GenerateContentRequest):
         (req.session_id,)
     )
     rows = cursor.fetchall()
+
+    target_lang = req.language
+    if not target_lang or target_lang == "hi":
+        cursor.execute("SELECT teaching_language FROM sessions WHERE id = ?", (req.session_id,))
+        s_row = cursor.fetchone()
+        if s_row and s_row["teaching_language"]:
+            target_lang = s_row["teaching_language"]
     conn.close()
 
     # Build a combined lesson transcript from actual teacher speech
     lesson_texts = [r["original_text"] for r in rows if r["source_lang"] != "STUDENT"]
     if req.transcript_summary and req.transcript_summary.strip():
         lesson_texts.insert(0, req.transcript_summary)
-    full_transcript = " ".join(lesson_texts[:10]) if lesson_texts else req.transcript_summary or "Foundational Learning"
 
-    activity_data = generate_nipun_content(full_transcript, req.grade, req.activity_type, lang=req.language or "hi")
+    FALLBACK_LESSON_SUMMARIES = {
+        "hi": "आज का प्राथमिक पाठ एवं अभ्यास",
+        "sat": "ᱛᱮᱦᱮᱧᱟᱜ ᱪᱟᱱᱚᱪ ᱨᱮᱱᱟᱜ ᱢᱩᱬᱩᱛ ᱯᱟᱴ",
+        "bn": "আজকের ক্লাসের প্রাথমিক পাঠ",
+        "mr": "आजच्या वर्गाचा प्राथमिक पाठ",
+        "ta": "இன்றைய பாடத்தின் முக்கிய பகுதிகள்",
+        "te": "ఈ రోజు పాఠం యొక్క ప్రాథమిక విషయాలు",
+        "en": "Today's Primary Lesson"
+    }
+    fallback_summary = FALLBACK_LESSON_SUMMARIES.get(target_lang or "hi", "Today's Primary Lesson")
+    full_transcript = " ".join(lesson_texts[:10]) if lesson_texts else req.transcript_summary or fallback_summary
+
+    activity_data = generate_nipun_content(full_transcript, req.grade, req.activity_type, lang=target_lang or "hi")
     activity_id = str(uuid.uuid4())[:8]
     now = time.time()
 

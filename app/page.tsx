@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { SUPPORTED_LANGUAGES } from "@/lib/nipun-data";
-import { teacherSignup, teacherLogin, registerStudent } from "@/lib/api-client";
+import { teacherSignup, teacherLogin, registerStudent, getSessionByCode } from "@/lib/api-client";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LanguageSwitch } from "@/components/language-switch";
 import { useLanguage } from "@/components/language-provider";
@@ -51,6 +51,7 @@ export default function VaaniSetuOnboarding() {
   const [grade, setGrade] = useState<number>(2);
   const [section, setSection] = useState("A");
   const [schoolName, setSchoolName] = useState("");
+  const [classCode, setClassCode] = useState("");
 
   useEffect(() => {
     try {
@@ -149,7 +150,19 @@ export default function VaaniSetuOnboarding() {
   const handleStudentRegister = async () => {
     if (!studentName.trim() || !schoolName.trim()) return;
     setIsLoading(true);
+    setAuthError("");
     try {
+      let foundSessionId = "";
+      if (classCode.trim()) {
+        try {
+          const sess = await getSessionByCode(classCode.trim());
+          foundSessionId = sess.id;
+        } catch {
+          setAuthError(t("sessionNotFoundError") || "Invalid class code or session not active.");
+          setIsLoading(false);
+          return;
+        }
+      }
       const langObj = SUPPORTED_LANGUAGES.find((l) => l.code === lang) || SUPPORTED_LANGUAGES[0];
       await registerStudent({
         name: studentName.trim(),
@@ -165,6 +178,8 @@ export default function VaaniSetuOnboarding() {
       localStorage.setItem("user_grade", String(grade));
       localStorage.setItem("user_section", section.trim() || "A");
       localStorage.setItem("user_school", schoolName.trim());
+      if (classCode.trim()) localStorage.setItem("user_class_code", classCode.trim().toUpperCase());
+      if (foundSessionId) localStorage.setItem("user_joined_session_id", foundSessionId);
       router.push("/student");
     } catch {
       router.push("/student");
@@ -701,6 +716,22 @@ export default function VaaniSetuOnboarding() {
                     onChange={(e) => setSchoolName(e.target.value)}
                     placeholder="e.g. Government Primary School, Ranchi"
                     className="vs-input w-full px-4 py-3 rounded-xl text-sm font-medium" />
+                </div>
+
+                {/* Class Code Input */}
+                <div className="space-y-1 pt-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-bold text-[var(--brand-deep)] uppercase tracking-wider block">
+                      🔑 {t("classCodeLabel")}
+                    </label>
+                    <span className="text-[10px] text-[var(--text-muted)] font-medium">Optional / ऐच्छिक</span>
+                  </div>
+                  <input id="input-student-class-code" type="text" value={classCode}
+                    onChange={(e) => setClassCode(e.target.value.toUpperCase())}
+                    placeholder={t("classCodePlaceholder")}
+                    maxLength={6}
+                    className="vs-input w-full px-4 py-3 rounded-xl text-base font-black tracking-widest uppercase text-center border-2 border-[var(--brand)] bg-[var(--brand-tint)]/40 focus:bg-[var(--surface-1)]" />
+                  <p className="text-[10px] text-[var(--text-muted)] mt-0.5">{t("classCodeSub")}</p>
                 </div>
               </div>
 

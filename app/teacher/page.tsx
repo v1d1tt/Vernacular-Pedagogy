@@ -2,12 +2,13 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { createSession, broadcastSpeech, generateAiContent, approveAiContent, connectWebSocket, transcribeAudio } from "@/lib/api-client";
+import { createSession, broadcastSpeech, generateAiContent, approveAiContent, connectWebSocket, transcribeAudio, getEdgeServerUrl } from "@/lib/api-client";
 import { AudioRecorder } from "@/lib/audio-recorder";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LanguageSwitch } from "@/components/language-switch";
 import { useLanguage } from "@/components/language-provider";
 import { Mic, MicOff, Hand, Check, X, Sparkles, ArrowLeft, Send, Radio, ChevronRight, Users, Loader2 } from "lucide-react";
+import { MicWaveform } from "@/components/mic-waveform";
 
 export interface SessionInfo {
   session_id: string;
@@ -93,6 +94,17 @@ export default function TeacherConsole() {
   const handleBroadcastSpeech = async (textToSend?: string) => {
     const text = textToSend || speechText;
     if (!text.trim() || !activeSession) return;
+
+    // Check voice command shortcuts
+    const lower = text.toLowerCase();
+    if (lower.includes("generate quiz") || lower.includes("क्विज़ बनाएँ")) {
+      handleTriggerAiContent("QUIZ");
+    } else if (lower.includes("generate flashcard") || lower.includes("फ्लैशकार्ड बनाएँ")) {
+      handleTriggerAiContent("FLASHCARD");
+    } else if (lower.includes("mute all") || lower.includes("सबको म्यूट")) {
+      setRaiseHandQueue([]);
+    }
+
     const res = await broadcastSpeech({
       session_id: activeSession.session_id,
       speaker_name: teacherName,
@@ -145,7 +157,7 @@ export default function TeacherConsole() {
   const handleApproveSpeaking = async (participantId: string, allow: boolean) => {
     setRaiseHandQueue((prev) => prev.filter((p) => p.participant_id !== participantId));
     fetch(
-      `http://localhost:8000/api/sessions/${activeSession?.session_id}/approve-speaking?participant_id=${participantId}&allow=${allow}`,
+      `${getEdgeServerUrl()}/api/sessions/${activeSession?.session_id}/approve-speaking?participant_id=${participantId}&allow=${allow}`,
       { method: "POST" }
     );
   };
@@ -246,8 +258,9 @@ export default function TeacherConsole() {
             <div className="px-5 py-3.5 border-b border-[var(--border-sub)] flex items-center gap-2">
               <Mic className="w-4 h-4 text-[var(--brand)]" />
               <h2 className="text-sm font-bold text-[var(--text-primary)]">{t("broadcastToClass")}</h2>
+              {isRecording && <MicWaveform isSpeaking={true} className="ml-auto" />}
               {activeSession && (
-                <span className="ml-auto text-[10px] text-[var(--text-muted)] font-mono bg-[var(--surface-2)] px-2 py-0.5 rounded-full">
+                <span className={`${isRecording ? "ml-2" : "ml-auto"} text-[10px] text-[var(--text-muted)] font-mono bg-[var(--surface-2)] px-2 py-0.5 rounded-full`}>
                   ID: {activeSession.session_id}
                 </span>
               )}

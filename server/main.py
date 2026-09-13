@@ -1,6 +1,7 @@
 import uuid
 import time
 import json
+import hashlib
 from typing import Dict, Any, List, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -46,6 +47,7 @@ class GenerateContentRequest(BaseModel):
     transcript_summary: str
     grade: int
     activity_type: str  # QUIZ, FLASHCARD, WORKSHEET
+    language: Optional[str] = "hi"
 
 class ApproveContentRequest(BaseModel):
     activity_id: str
@@ -61,6 +63,31 @@ class TranscribeRequest(BaseModel):
     audio_base64: Optional[str] = None
     language: Optional[str] = "hi"
     sample_rate: Optional[int] = 16000
+
+class GoogleAuthRequest(BaseModel):
+    email: str
+    name: str
+    picture: Optional[str] = None
+    preferred_language: Optional[str] = "en"
+
+class TeacherSignupRequest(BaseModel):
+    name: str
+    password: str
+    subject: str
+    grade: int
+    school_name: str
+    preferred_language: Optional[str] = "hi"
+
+class TeacherLoginRequest(BaseModel):
+    name: str
+    password: str
+
+class StudentRegisterRequest(BaseModel):
+    name: str
+    grade: int
+    section: str
+    school_name: str
+    preferred_language: str
 
 @app.on_event("startup")
 def startup_event():
@@ -102,6 +129,124 @@ def tts_speak(text: str = "", lang: str = "hi", speed: float = 1.0):
     if not wav_bytes:
         raise HTTPException(status_code=500, detail="Speech synthesis failed or model not ready")
     return Response(content=wav_bytes, media_type="audio/wav")
+
+def _hash_password(password: str) -> str:
+    """SHA-256 password hash with a fixed salt prefix for offline use."""
+    salted = f"vset-salt-2025:{password}"
+    return hashlib.sha256(salted.encode()).hexdigest()
+
+# Teacher & Student Auth / Registration
+@app.post("/api/auth/google")
+def google_auth(req: GoogleAuthRequest):
+    """Legacy endpoint — simple upsert for backward compatibility."""
+    teacher_id = "T-" + str(uuid.uuid4())[:8]
+    now = time.time()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM teachers WHERE email = ?", (req.email,))
+    existing = cursor.fetchone()
+    if existing:
+        conn.close()
+        return dict(existing)
+    cursor.execute('''
+    INSERT INTO teachers (id, email, name, picture, preferred_language, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ''', (teacher_id, req.email, req.name, req.picture or "", req.preferred_language or "hi", now))
+    conn.commit()
+    conn.close()
+    return {
+        "id": teacher_id, "email": req.email, "name": req.name,
+        "preferred_language": req.preferred_language or "hi", "created_at": now
+    }
+
+@app.post("/api/auth/teacher/signup")
+def teacher_signup(req: TeacherSignupRequest):
+    """Teacher registration: saves profile + hashed password. Fails if name already exists."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM teachers WHERE name = ?", (req.name.strip(),))
+    if cursor.fetchone():
+        conn.close()
+        raise HTTPException(status_code=409, detail="ACCOUNT_EXISTS")
+    teacher_id = "T-" + str(uuid.uuid4())[:8]
+    now = time.time()
+    pwd_hash = _hash_password(req.password)
+    placeholder_email = f"teacher_{uuid.uuid4().hex[:10]}@offline.local"
+    try:
+        cursor.execute('''
+        INSERT INTO teachers (id, email, name, picture, preferred_language, subject, grade, school_name, password_hash, created_at)
+        VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, ?)
+        ''', (teacher_id, placeholder_email, req.name.strip(), req.preferred_language or "hi",
+              req.subject, req.grade, req.school_name, pwd_hash, now))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.close()
+        raise HTTPException(status_code=409, detail="ACCOUNT_EXISTS")
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    conn.close()
+    return {
+        "id": teacher_id, "name": req.name.strip(),
+        "subject": req.subject, "grade": req.grade, "school_name": req.school_name,
+        "preferred_language": req.preferred_language or "hi", "created_at": now
+    }
+
+@app.post("/api/auth/teacher/login")
+def teacher_login(req: TeacherLoginRequest):
+    """Teacher login: verifies name + password hash."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM teachers WHERE name = ?", (req.name.strip(),))
+    teacher = cursor.fetchone()
+    conn.close()
+    if not teacher:
+        raise HTTPException(status_code=404, detail="ACCOUNT_NOT_FOUND")
+    stored_hash = teacher["password_hash"] or ""
+    if not stored_hash:
+        raise HTTPException(status_code=403, detail="NO_PASSWORD_SET")
+    if _hash_password(req.password) != stored_hash:
+        raise HTTPException(status_code=401, detail="WRONG_PASSWORD")
+    return {
+        "id": teacher["id"], "name": teacher["name"],
+        "subject": teacher["subject"] or "", "grade": teacher["grade"] or 2,
+        "school_name": teacher["school_name"] or "",
+        "preferred_language": teacher["preferred_language"] or "hi"
+    }
+
+@app.get("/api/auth/teacher/check")
+def teacher_check_email(email: str):
+    """Check if a teacher account already exists for a given email."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, name, email FROM teachers WHERE email = ?", (email,))
+    teacher = cursor.fetchone()
+    conn.close()
+    if teacher:
+        return {"exists": True, "name": teacher["name"]}
+    return {"exists": False}
+
+@app.post("/api/students/register")
+def register_student(req: StudentRegisterRequest):
+    student_id = "S-" + str(uuid.uuid4())[:8]
+    now = time.time()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+    INSERT INTO students (id, name, grade, section, school_name, preferred_language, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ''', (student_id, req.name, req.grade, req.section, req.school_name, req.preferred_language, now))
+    conn.commit()
+    conn.close()
+    return {
+        "id": student_id,
+        "name": req.name,
+        "grade": req.grade,
+        "section": req.section,
+        "school_name": req.school_name,
+        "preferred_language": req.preferred_language,
+        "created_at": now
+    }
 
 # Session Management
 @app.post("/api/sessions")
@@ -250,7 +395,7 @@ async def approve_speaking(session_id: str, participant_id: str, allow: bool):
 # AI Content Generation & Teacher Approval Workflow
 @app.post("/api/content/generate")
 async def generate_content(req: GenerateContentRequest):
-    activity_data = generate_nipun_content(req.transcript_summary, req.grade, req.activity_type)
+    activity_data = generate_nipun_content(req.transcript_summary, req.grade, req.activity_type, lang=req.language or "hi")
     activity_id = str(uuid.uuid4())[:8]
     now = time.time()
 
@@ -371,4 +516,4 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)

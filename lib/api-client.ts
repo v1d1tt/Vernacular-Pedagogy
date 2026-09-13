@@ -291,6 +291,16 @@ export async function transcribeAudio(base64Audio: string, language: string = "h
   }
 }
 
+export async function fetchPublishedActivities(sessionId: string) {
+  try {
+    const res = await fetch(`${getEdgeServerUrl()}/api/sessions/${sessionId}/activities?status=APPROVED`);
+    if (!res.ok) throw new Error("Failed to fetch activities");
+    return await res.json();
+  } catch {
+    return { activities: [] };
+  }
+}
+
 export async function fetchAiStatus() {
   try {
     const res = await fetch(`${getEdgeServerUrl()}/api/ai/status`);
@@ -300,4 +310,67 @@ export async function fetchAiStatus() {
     return { active_models: {}, vad_ready: false, asr_ready: false };
   }
 }
+
+export async function googleAuth(email: string, name: string, picture?: string, preferred_language?: string) {
+  try {
+    const res = await fetch(`${getEdgeServerUrl()}/api/auth/google`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, name, picture, preferred_language })
+    });
+    if (!res.ok) throw new Error("Google auth failed");
+    return await res.json();
+  } catch {
+    return { id: "T-DEFAULT", email, name, picture, preferred_language: preferred_language || "en" };
+  }
+}
+
+export async function registerStudent(data: { name: string; grade: number; section: string; school_name: string; preferred_language: string }) {
+  try {
+    const res = await fetch(`${getEdgeServerUrl()}/api/students/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data)
+    });
+    if (!res.ok) throw new Error("Student registration failed");
+    return await res.json();
+  } catch {
+    return { id: "S-DEFAULT", ...data };
+  }
+}
+
+export async function teacherSignup(data: { name: string; password: string; subject: string; grade: number; school_name: string; preferred_language: string }) {
+  const res = await fetch(`${getEdgeServerUrl()}/api/auth/teacher/signup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  if (res.status === 409) throw new Error("ACCOUNT_EXISTS");
+  if (!res.ok) throw new Error("Signup failed");
+  return await res.json();
+}
+
+export async function teacherLogin(name: string, password: string) {
+  const res = await fetch(`${getEdgeServerUrl()}/api/auth/teacher/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, password })
+  });
+  if (res.status === 404) throw new Error("ACCOUNT_NOT_FOUND");
+  if (res.status === 401) throw new Error("WRONG_PASSWORD");
+  if (!res.ok) throw new Error("Login failed");
+  return await res.json();
+}
+
+export async function teacherCheckEmail(email: string): Promise<{ exists: boolean; name?: string }> {
+  try {
+    const res = await fetch(`${getEdgeServerUrl()}/api/auth/teacher/check?email=${encodeURIComponent(email)}`);
+    if (!res.ok) return { exists: false };
+    return await res.json();
+  } catch {
+    return { exists: false };
+  }
+}
+
+
 

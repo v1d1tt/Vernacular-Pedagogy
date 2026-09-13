@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { useLanguage } from "@/components/language-provider";
+import { LanguageCode } from "@/lib/translations";
 import { Globe, Check, ChevronDown } from "lucide-react";
 
 export function LanguageSwitch({ className = "" }: { className?: string }) {
@@ -44,18 +45,23 @@ export function LanguageSwitch({ className = "" }: { className?: string }) {
           <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] border-b border-[var(--border-sub)]">
             {t("switchLanguage", "Language / भाषा")}
           </div>
-          <div className="py-1 max-h-60 overflow-y-auto">
+          <div className="py-1 max-h-72 overflow-y-auto">
             {supportedLanguages.map((item) => {
               const active = item.code === lang;
+              const isDisabled = item.disabled;
               return (
                 <button
                   key={item.code}
+                  disabled={isDisabled}
                   onClick={() => {
-                    setLang(item.code);
+                    if (isDisabled) return;
+                    setLang(item.code as LanguageCode);
                     setIsOpen(false);
                   }}
                   className={`w-full px-3 py-2 text-left flex items-center justify-between text-xs transition ${
-                    active
+                    isDisabled
+                      ? "opacity-50 cursor-not-allowed bg-transparent"
+                      : active
                       ? "bg-[var(--brand-tint)] text-[var(--brand-deep)] font-bold"
                       : "text-[var(--text-primary)] hover:bg-[var(--surface-2)]"
                   }`}
@@ -64,7 +70,13 @@ export function LanguageSwitch({ className = "" }: { className?: string }) {
                     <span className="font-bold text-xs">{item.nativeName}</span>
                     <span className="text-[10px] text-[var(--text-muted)]">{item.name}</span>
                   </div>
-                  {active && <Check className="w-3.5 h-3.5 text-[var(--brand)]" />}
+                  {isDisabled ? (
+                    <span className="text-[9px] font-extrabold uppercase tracking-wider bg-[var(--surface-2)] text-[var(--text-muted)] px-1.5 py-0.5 rounded">
+                      {item.badge || "Soon"}
+                    </span>
+                  ) : (
+                    active && <Check className="w-3.5 h-3.5 text-[var(--brand)]" />
+                  )}
                 </button>
               );
             })}

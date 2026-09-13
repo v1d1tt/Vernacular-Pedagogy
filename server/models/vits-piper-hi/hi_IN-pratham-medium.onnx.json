@@ -1,4 +1,5 @@
 {
+  "sample_rate": 22050,
   "dataset": "pratham",
   "audio": {
     "sample_rate": 22050,

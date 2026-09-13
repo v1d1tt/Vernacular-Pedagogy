@@ -82,6 +82,46 @@ def init_db():
     )
     ''')
 
+    # Registered Teachers table (Google SSO + Password Auth)
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS teachers (
+        id TEXT PRIMARY KEY,
+        email TEXT DEFAULT '',
+        name TEXT NOT NULL,
+        picture TEXT DEFAULT '',
+        preferred_language TEXT DEFAULT 'en',
+        subject TEXT DEFAULT '',
+        grade INTEGER DEFAULT 2,
+        school_name TEXT DEFAULT '',
+        password_hash TEXT DEFAULT '',
+        created_at REAL NOT NULL
+    )
+    ''')
+    # Migrate: add new columns if they don't exist yet (for existing DBs)
+    for col, col_def in [
+        ("subject", "TEXT DEFAULT ''"),
+        ("grade", "INTEGER DEFAULT 2"),
+        ("school_name", "TEXT DEFAULT ''"),
+        ("password_hash", "TEXT DEFAULT ''"),
+    ]:
+        try:
+            cursor.execute(f"ALTER TABLE teachers ADD COLUMN {col} {col_def}")
+        except Exception:
+            pass  # Column already exists
+
+    # Registered Students table
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS students (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        grade INTEGER NOT NULL,
+        section TEXT NOT NULL,
+        school_name TEXT NOT NULL,
+        preferred_language TEXT NOT NULL,
+        created_at REAL NOT NULL
+    )
+    ''')
+
     conn.commit()
     conn.close()
 

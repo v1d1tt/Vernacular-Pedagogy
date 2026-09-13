@@ -152,6 +152,25 @@ CLASSROOM_LEXICON = {
     },
 }
 
+def parse_voice_command(text: str) -> Optional[Dict[str, Any]]:
+    """
+    Parses teacher voice command shortcuts for automated classroom actions.
+    Examples:
+    - "generate quiz on addition" / "क्विज़ बनाओ" -> TRIGGER_QUIZ
+    - "generate flashcards" / "फ्लैशकार्ड" -> TRIGGER_FLASHCARD
+    - "mute all students" / "सबको म्यूट करो" -> MUTE_ALL
+    """
+    if not text:
+        return None
+    t_lower = text.lower().strip()
+    if any(k in t_lower for k in ["generate quiz", "create quiz", "क्विज़", "क्विज़ बनाओ", "quiz"]):
+        return {"command": "TRIGGER_QUIZ", "action": "Generate Quiz Activity"}
+    elif any(k in t_lower for k in ["flashcards", "flashcard", "फ्लैशकार्ड", "कार्ड"]):
+        return {"command": "TRIGGER_FLASHCARD", "action": "Generate Flashcards"}
+    elif any(k in t_lower for k in ["mute all", "mute students", "म्यूट करो", "शांत"]):
+        return {"command": "MUTE_ALL", "action": "Mute All Students"}
+    return None
+
 def transcribe_audio_chunk(audio_array: np.ndarray, sample_rate: int = 16000, lang: str = "hi") -> Dict[str, Any]:
     """
     Runs real Silero VAD and ASR pipeline.
@@ -174,12 +193,14 @@ def transcribe_audio_chunk(audio_array: np.ndarray, sample_rate: int = 16000, la
     latency = round(time.time() - t_start, 3)
 
     engine = WHISPER_SANTALI_HF_ID if lang == "sat" else "sherpa-onnx (whisper-tiny-int8)"
+    voice_cmd = parse_voice_command(text)
 
     return {
         "text": text,
         "is_speech": bool(text.strip()),
         "latency_seconds": latency,
-        "engine": engine
+        "engine": engine,
+        "detected_command": voice_cmd
     }
 
 def translate_speech(original_text: str, source_lang: str, target_languages: List[str]) -> Dict[str, Any]:

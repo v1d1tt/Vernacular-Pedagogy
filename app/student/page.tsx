@@ -2,12 +2,13 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { fetchActiveSessions, joinSession, connectWebSocket, transcribeAudio, broadcastSpeech, getEdgeCandidates } from "@/lib/api-client";
+import { fetchActiveSessions, joinSession, connectWebSocket, transcribeAudio, broadcastSpeech, getEdgeCandidates, detectActiveEdgeServer, getEdgeServerUrl, fetchPublishedActivities } from "@/lib/api-client";
 import { AudioRecorder } from "@/lib/audio-recorder";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LanguageSwitch } from "@/components/language-switch";
 import { useLanguage } from "@/components/language-provider";
 import { Volume2, Hand, HelpCircle, BookOpen, ArrowLeft, CheckCircle2, Mic, MicOff, Award, Globe, ChevronDown } from "lucide-react";
+import { MicWaveform } from "@/components/mic-waveform";
 import { SUPPORTED_LANGUAGES } from "@/lib/nipun-data";
 
 export interface StudentActivity {
@@ -28,7 +29,7 @@ export interface StudentActivity {
 
 const FLASHCARDS_DATA: Record<string, Array<{ word: string; eng: string; desc: string; visual: string; tint: string }>> = {
   hi: [
-    { word: "सूरज", eng: "Sun", desc: "आसमान का चमकता तारा", visual: "☀️", tint: "var(--amber-tint)" },
+    { word: "सूर्य", eng: "Sun", desc: "आसमान का चमकता तारा", visual: "☀️", tint: "var(--amber-tint)" },
     { word: "पेड़", eng: "Tree", desc: "छाया और ऑक्सीजन देता है", visual: "🌳", tint: "var(--green-tint)" },
     { word: "पानी", eng: "Water", desc: "जीवन के लिए सबसे ज़रूरी", visual: "💧", tint: "var(--brand-tint)" },
     { word: "फूल", eng: "Flower", desc: "रंग-बिरंगा और सुगंधित", visual: "🌸", tint: "var(--red-tint)" },
@@ -63,6 +64,12 @@ const FLASHCARDS_DATA: Record<string, Array<{ word: string; eng: string; desc: s
     { word: "నీరు", eng: "Water", desc: "జీవులన్నింటికీ అవసరమైనది", visual: "💧", tint: "var(--brand-tint)" },
     { word: "పువ్వు", eng: "Flower", desc: "రంగురంగుల మరియు సువాసనగల", visual: "🌸", tint: "var(--red-tint)" },
   ],
+  sat: [
+    { word: "ᱧᱤᱫᱟᱹ", eng: "Sun", desc: "ᱥᱮᱨᱢᱟ ᱨᱮ ᱡᱟᱞᱟᱜ ᱤᱯᱤᱞ", visual: "☀️", tint: "var(--amber-tint)" },
+    { word: "ᱫᱟᱨᱮ", eng: "Tree", desc: "ᱧᱤᱫᱟ ᱟᱨ ᱚᱠᱥᱤᱡᱮᱱ ᱮᱢᱟ", visual: "🌳", tint: "var(--green-tint)" },
+    { word: "ᱫᱟᱹᱜ", eng: "Water", desc: "ᱡᱤᱭᱚᱱ ᱞᱟᱹᱜᱤᱫ ᱫᱚᱨᱠᱟᱨ", visual: "💧", tint: "var(--brand-tint)" },
+    { word: "ᱵᱟᱦᱟ", eng: "Flower", desc: "ᱨᱚᱝ-ᱵᱮᱨᱚᱝ ᱟᱨ ᱥᱩᱵᱟᱥ", visual: "🌸", tint: "var(--red-tint)" },
+  ],
 };
 
 type WindowWithAudio = Window & typeof globalThis & {
@@ -81,7 +88,10 @@ export default function StudentConsole() {
   const [grade, setGrade] = useState(2);
   const [participantId] = useState("P-" + Math.floor(Math.random() * 1000));
   const [joinedSession, setJoinedSession] = useState<{ session_id: string } | null>(null);
-  const [activeTab, setActiveTab] = useState<"LISTEN" | "QUIZ" | "FLASHCARDS">("LISTEN");
+  const [activeTab, setActiveTab] = useState<"LISTEN" | "QUIZ" | "FLASHCARDS" | "GAMES">("LISTEN");
+  const [selectedSubject, setSelectedSubject] = useState<"MATHS" | "EVS" | "HINDI" | "ENGLISH">("MATHS");
+  const [gameScore, setGameScore] = useState<number>(0);
+  const [activeGameIndex, setActiveGameIndex] = useState<number>(0);
 
   // Teacher speech in teacher's language (English default)
   const [teacherSpeech, setTeacherSpeech] = useState(
@@ -123,9 +133,10 @@ export default function StudentConsole() {
       hi: "नमस्ते बच्चों, आज हम गणित में नई चीज़ें सीखेंगे।",
       en: "Hello children, today we will learn new things in mathematics.",
       bn: "নমস্কার বাচ্চারা, আজ আমরা গণিতে নতুন কিছু শিখব।",
-      mr: "नमस्कार मुलांनो, আজ आपण गणितात नवीन गोष्टी शिकणार आहोत.",
+      mr: "नमस्कार मुलांनो, आज आपण गणितात नवीन गोष्टी शिकणार आहोत.",
       ta: "வணக்கம் குழந்தைகளே, இன்று நாம் கணிதத்தில் புதிய விஷயங்களைக் கற்றுக்கொள்வோம்.",
       te: "నమస్కారం పిల్లలు, ఈరోజు మనం గణితంలో కొత్త విషయాలు నేర్చుకుందాం.",
+      sat: "ᱡᱚᱦᱟᱨ ᱜᱤᱫᱽᱨᱟᱹ, ᱛᱮᱦᱮᱧ ᱟᱵᱚ ᱮᱞᱠᱷᱟ ᱨᱮ ᱱᱟᱶᱟ ᱡᱤᱱᱤᱥ ᱵᱚᱱ ᱪᱮᱫᱚᱜᱼᱟ᱾",
     };
     if (initialGreetings[code]) {
       setTranslatedSpeech(initialGreetings[code]);
@@ -168,17 +179,21 @@ export default function StudentConsole() {
           };
           utterance.lang = langMap[targetLang] || "hi-IN";
           utterance.rate = 0.9;
-          utterance.pitch = 1.0;
+          utterance.pitch = 1.25; // Female voice pitch modulation
 
-          // Select matching voice only if language actually matches; never force English voices[0] on Indic scripts!
+          // Select matching female voice if available
           const voices = window.speechSynthesis.getVoices();
           const langPrefix = targetLang.toLowerCase().slice(0, 2);
-          const match = voices.find((v) => {
+          const femaleMatch = voices.find((v) => {
+            const vl = (v.lang || "").toLowerCase().replace("_", "-");
+            const vn = (v.name || "").toLowerCase();
+            return vl.startsWith(langPrefix) && (vn.includes("female") || vn.includes("woman") || vn.includes("swara") || vn.includes("google") || vn.includes("kalpana"));
+          }) || voices.find((v) => {
             const vl = (v.lang || "").toLowerCase().replace("_", "-");
             return vl.startsWith(langPrefix);
           });
-          if (match) {
-            utterance.voice = match;
+          if (femaleMatch) {
+            utterance.voice = femaleMatch;
           }
 
           // Retain utterance on window to prevent Android WebView garbage collection silence bug
@@ -283,10 +298,11 @@ export default function StudentConsole() {
     const initialGreetings: Record<string, string> = {
       hi: "नमस्ते बच्चों, आज हम गणित में नई चीज़ें सीखेंगे।",
       en: "Hello children, today we will learn new things in mathematics.",
-      bn: "নমস্কার বাচ্চারা, আজ আমরা গণিতে নতুন কিছু শিখব।",
+      bn: "নমস্কার বাচ্চারা, আজ আমরা গণিতে নতুন कुछ শিখব।",
       mr: "नमस्कार मुलांनो, आज आपण गणितात नवीन गोष्टी शिकणार आहोत.",
       ta: "வணக்கம் குழந்தைகளே, இன்று நாம் கணிதத்தில் புதிய விஷயங்களைக் கற்றுக்கொள்வோம்.",
       te: "నమస్కారం పిల్లలు, ఈరోజు మనం గణితంలో కొత్త విషయాలు నేర్చుకుందాం.",
+      sat: "ᱡᱚᱦᱟᱨ ᱜᱤᱫᱽᱨᱟᱹ, ᱛᱮᱦᱮᱧ ᱟᱵᱚ ᱮᱞᱠᱷᱟ ᱨᱮ ᱱᱟᱶᱟ ᱡᱤᱱᱤᱥ ᱵᱚᱱ ᱪᱮᱫᱚᱜᱼᱟ᱾",
     };
     if (l && initialGreetings[l]) {
       setTranslatedSpeech(initialGreetings[l]);
@@ -294,15 +310,23 @@ export default function StudentConsole() {
 
     async function init() {
       try {
+        await detectActiveEdgeServer();
         const res = await fetchActiveSessions();
-        if (res?.sessions && res.sessions.length > 0) {
-          const session = res.sessions[0];
+        const activeList = res?.sessions || [];
+        if (activeList.length > 0) {
+          const session = activeList[0];
           await joinSession(session.id, {
             student_id: participantId,
             student_name: s || "Aarav",
             preferred_language: l || "hi",
           });
           setJoinedSession({ session_id: session.id });
+
+          fetchPublishedActivities(session.id).then((res) => {
+            if (res && res.activities && res.activities.length > 0) {
+              setActivities(res.activities as StudentActivity[]);
+            }
+          });
 
           connectWebSocket(session.id, (msg) => {
             if (msg.type === "SPEECH_TRANSLATED") {
@@ -316,21 +340,27 @@ export default function StudentConsole() {
               const myTrans = trans[curLang] || trans["hi"] || trans["en"] || origText;
               setTranslatedSpeech(myTrans);
               setTtfa((msg.ttfa_seconds as number) || 0.45);
-            } else if (msg.type === "SPEAKING_PERMISSION") {
+              playSyntheticAudio(myTrans, curLang);
+            } else if (msg.type === "SPEAKING_PERMISSION" || msg.type === "SPEAKING_PERMISSION_CHANGED") {
               if (msg.participant_id === participantId) {
-                setCanSpeak(Boolean(msg.allowed));
-                if (msg.allowed) {
+                setCanSpeak(Boolean(msg.can_speak ?? msg.allowed));
+                if (msg.can_speak || msg.allowed) {
                   setRaisedHand(false);
                 }
               }
-            } else if (msg.type === "ACTIVITY_APPROVED") {
+            } else if (msg.type === "ACTIVITY_APPROVED" || msg.type === "ACTIVITY_PUBLISHED_TO_CLASS") {
               const act = msg.activity as StudentActivity;
-              setActivities((prev) => [act, ...prev]);
+              if (act) {
+                setActivities((prev) => [act, ...prev.filter((a) => a.activity_id !== act.activity_id)]);
+              }
             }
           });
+        } else {
+          setJoinedSession({ session_id: "LOCAL-DEMO-01" });
         }
       } catch (err) {
         console.error("Auto-connect failed:", err);
+        setJoinedSession({ session_id: "LOCAL-DEMO-01" });
       }
     }
     init();
@@ -383,7 +413,7 @@ export default function StudentConsole() {
     setRaisedHand(nextState);
     if (!nextState) setCanSpeak(false);
     fetch(
-      `http://localhost:8000/api/sessions/${joinedSession.session_id}/raise-hand?participant_id=${participantId}&student_name=${encodeURIComponent(
+      `${getEdgeServerUrl()}/api/sessions/${joinedSession.session_id}/raise-hand?participant_id=${participantId}&student_name=${encodeURIComponent(
         studentName
       )}&raised=${nextState}`,
       { method: "POST" }
@@ -394,6 +424,7 @@ export default function StudentConsole() {
     { id: "LISTEN" as const, label: t("tabListen"), icon: <Volume2 className="w-4 h-4" /> },
     { id: "QUIZ" as const, label: t("tabQuiz"), icon: <HelpCircle className="w-4 h-4" /> },
     { id: "FLASHCARDS" as const, label: t("tabCards"), icon: <BookOpen className="w-4 h-4" /> },
+    { id: "GAMES" as const, label: "FLN Games 🎮", icon: <Award className="w-4 h-4" /> },
   ];
 
   return (
@@ -488,6 +519,28 @@ export default function StudentConsole() {
           ))}
         </div>
 
+        {/* Subject Channels */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+          {[
+            { id: "MATHS" as const, label: "Mathematics 📐", tint: "bg-[var(--brand-tint)] text-[var(--brand-deep)] border-[var(--brand-tint2)]" },
+            { id: "EVS" as const, label: "EVS / Science 🌿", tint: "bg-[var(--green-tint)] text-[var(--green)] border-[var(--green-tint)]" },
+            { id: "HINDI" as const, label: "Hindi 📚", tint: "bg-[var(--amber-tint)] text-[var(--amber)] border-[var(--amber-tint)]" },
+            { id: "ENGLISH" as const, label: "English 🔤", tint: "bg-[var(--violet-tint)] text-[var(--violet)] border-[var(--violet-tint)]" },
+          ].map((sub) => (
+            <button
+              key={sub.id}
+              onClick={() => setSelectedSubject(sub.id)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap border transition ${
+                selectedSubject === sub.id
+                  ? `${sub.tint} shadow-sm ring-2 ring-[var(--brand)]`
+                  : "bg-[var(--surface-2)] text-[var(--text-muted)] border-[var(--border)] hover:text-[var(--text-primary)]"
+              }`}
+            >
+              {sub.label}
+            </button>
+          ))}
+        </div>
+
         {/* LISTEN */}
         {activeTab === "LISTEN" && (
           <div className="space-y-4">
@@ -524,6 +577,7 @@ export default function StudentConsole() {
                       <Globe className="w-3.5 h-3.5" />
                       In your language ({studentLangName})
                     </span>
+                    {isPlayingAudio && <MicWaveform isSpeaking={true} />}
                   </div>
                   <p className="text-lg font-bold text-[var(--text-primary)] leading-relaxed">
                     &ldquo;{translatedSpeech}&rdquo;
@@ -683,6 +737,155 @@ export default function StudentConsole() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* FLN GAMES */}
+        {activeTab === "GAMES" && (
+          <div className="space-y-4">
+            <div className="vs-surface rounded-2xl p-5 border border-[var(--brand-tint2)] bg-[var(--brand-tint)] flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Award className="w-5 h-5 text-[var(--brand-deep)]" />
+                  <h3 className="text-sm font-bold text-[var(--brand-deep)]">NIPUN Foundational FLN Hub</h3>
+                </div>
+                <p className="text-xs text-[var(--text-secondary)] mt-0.5">
+                  Interactive audio games for Class {grade} · Language: <span className="font-bold">{studentLangName}</span>
+                </p>
+              </div>
+              <div className="px-3 py-1.5 rounded-xl bg-[var(--surface)] border border-[var(--brand-tint2)] text-xs font-black text-[var(--brand-deep)]">
+                ⭐ {gameScore} Stars
+              </div>
+            </div>
+
+            {/* Game Card */}
+            <div className="vs-surface rounded-2xl p-6 text-center space-y-5">
+              <div className="flex items-center justify-between text-xs text-[var(--text-muted)] font-bold uppercase tracking-wider">
+                <span>Game {activeGameIndex + 1} of 3</span>
+                <span>Subject: {selectedSubject}</span>
+              </div>
+
+              {activeGameIndex === 0 && (
+                <div className="space-y-4">
+                  <h4 className="text-lg font-black text-[var(--text-primary)]">
+                    {studentLang === "sat" ? "ᱮᱞᱠᱷᱟ: ᱛᱤᱱᱟᱹᱜ ᱥᱮᱣ ᱢᱮᱱᱟᱜᱼᱟ? (Count Apples)" : "गिनती: कितने सेब हैं? (Count Apples)"}
+                  </h4>
+                  <div className="flex items-center justify-center gap-4 text-5xl py-6 bg-[var(--surface-2)] rounded-2xl border border-[var(--border)]">
+                    🍎 🍎 🍎 🍎
+                  </div>
+                  <button
+                    onClick={() => playSyntheticAudio(studentLang === "sat" ? "ᱯᱩᱱᱭᱟᱹ ᱥᱮᱣ" : "चार सेब हैं", studentLang)}
+                    className="mx-auto px-4 py-2 rounded-xl bg-[var(--brand-tint)] text-[var(--brand-deep)] font-bold text-xs flex items-center gap-2 hover:bg-[var(--brand-tint2)] transition"
+                  >
+                    <Volume2 className="w-4 h-4" /> {studentLang === "sat" ? "ᱥᱟᱰᱮ ᱟᱸᱡᱚᱢ (Listen)" : "आवाज़ सुनें (Listen)"}
+                  </button>
+                  <div className="grid grid-cols-4 gap-3 pt-2">
+                    {[2, 3, 4, 5].map((num) => (
+                      <button
+                        key={num}
+                        onClick={() => {
+                          if (num === 4) {
+                            setGameScore((s) => s + 10);
+                            playSyntheticAudio(studentLang === "sat" ? "ᱥᱟᱹᱨᱤ ᱜᱮ! ᱯᱩᱱᱭᱟᱹ" : "सही जवाब! चार", studentLang);
+                          } else {
+                            playSyntheticAudio(studentLang === "sat" ? "ᱟᱨᱦᱚᱸ ᱪᱮᱥᱴᱟᱭ platform" : "फिर से कोशिश करें", studentLang);
+                          }
+                        }}
+                        className="py-4 rounded-2xl bg-[var(--surface-2)] border-2 border-[var(--border)] hover:border-[var(--brand)] text-2xl font-black text-[var(--text-primary)] transition active:scale-95"
+                      >
+                        {num}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {activeGameIndex === 1 && (
+                <div className="space-y-4">
+                  <h4 className="text-lg font-black text-[var(--text-primary)]">
+                    {studentLang === "sat" ? "ᱚᱞ ᱪᱤᱠᱤ: 'ᱚ' ᱪᱤᱠᱤ ᱪᱤᱱᱦᱟᱹᱣ (Match Letter)" : "अक्षर ज्ञान: 'अ' अक्षर पहचानें"}
+                  </h4>
+                  <div className="text-6xl py-6 bg-[var(--violet-tint)] text-[var(--violet)] rounded-2xl font-black border border-[var(--violet-tint)]">
+                    {studentLang === "sat" ? "ᱚ" : "अ"}
+                  </div>
+                  <button
+                    onClick={() => playSyntheticAudio(studentLang === "sat" ? "ᱚ ᱪᱤᱠᱤ" : "अक्षर अ", studentLang)}
+                    className="mx-auto px-4 py-2 rounded-xl bg-[var(--violet-tint)] text-[var(--violet)] font-bold text-xs flex items-center gap-2 hover:opacity-80 transition"
+                  >
+                    <Volume2 className="w-4 h-4" /> Listen Sound
+                  </button>
+                  <div className="grid grid-cols-3 gap-3 pt-2">
+                    {(studentLang === "sat" ? ["ᱚ", "ᱛ", "ᱜ"] : ["अ", "क", "म"]).map((char) => (
+                      <button
+                        key={char}
+                        onClick={() => {
+                          if (char === (studentLang === "sat" ? "ᱚ" : "अ")) {
+                            setGameScore((s) => s + 10);
+                            playSyntheticAudio(studentLang === "sat" ? "ᱟᱹᱰᱤ ᱵᱮᱥ!" : "बहुत बढ़िया!", studentLang);
+                          }
+                        }}
+                        className="py-4 rounded-2xl bg-[var(--surface-2)] border-2 border-[var(--border)] hover:border-[var(--brand)] text-3xl font-black text-[var(--text-primary)] transition active:scale-95"
+                      >
+                        {char}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {activeGameIndex === 2 && (
+                <div className="space-y-4">
+                  <h4 className="text-lg font-black text-[var(--text-primary)]">
+                    {studentLang === "sat" ? "ᱡᱤᱣᱤᱭᱟᱹᱞᱤ: ᱱᱩᱭ ᱫᱚ ᱚᱠᱚᱭ? (Animal Sound)" : "पशु ज्ञान: यह कौन सा जानवर है?"}
+                  </h4>
+                  <div className="text-6xl py-6 bg-[var(--green-tint)] rounded-2xl border border-[var(--green-tint)]">
+                    🐘
+                  </div>
+                  <button
+                    onClick={() => playSyntheticAudio(studentLang === "sat" ? "ᱦᱟᱹᱛᱤ" : "हाथी", studentLang)}
+                    className="mx-auto px-4 py-2 rounded-xl bg-[var(--green-tint)] text-[var(--green)] font-bold text-xs flex items-center gap-2 hover:opacity-80 transition"
+                  >
+                    <Volume2 className="w-4 h-4" /> {studentLang === "sat" ? "ᱦᱟᱹᱛᱤ (Hati)" : "हाथी (Elephant)"}
+                  </button>
+                  <div className="grid grid-cols-2 gap-3 pt-2">
+                    {(studentLang === "sat"
+                      ? [{ name: "ᱦᱟᱹᱛᱤ (Elephant)", correct: true }, { name: "ᱥᱤᱢ (Rooster)", correct: false }]
+                      : [{ name: "हाथी (Elephant)", correct: true }, { name: "शेर (Lion)", correct: false }]
+                    ).map((opt, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => {
+                          if (opt.correct) {
+                            setGameScore((s) => s + 10);
+                            playSyntheticAudio(studentLang === "sat" ? "ᱥᱟᱹᱨᱤ ᱜᱮ! ᱦᱟᱹᱛᱤ" : "सही उत्तर! हाथी", studentLang);
+                          }
+                        }}
+                        className="py-3.5 rounded-xl bg-[var(--surface-2)] border-2 border-[var(--border)] hover:border-[var(--brand)] text-sm font-bold text-[var(--text-primary)] transition active:scale-95"
+                      >
+                        {opt.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Navigation */}
+              <div className="flex justify-between pt-4 border-t border-[var(--border-sub)]">
+                <button
+                  onClick={() => setActiveGameIndex((i) => Math.max(0, i - 1))}
+                  disabled={activeGameIndex === 0}
+                  className="px-4 py-2 rounded-xl bg-[var(--surface-2)] text-[var(--text-secondary)] font-bold text-xs disabled:opacity-40"
+                >
+                  ← Previous Game
+                </button>
+                <button
+                  onClick={() => setActiveGameIndex((i) => (i + 1) % 3)}
+                  className="px-4 py-2 rounded-xl vs-btn-brand text-xs"
+                >
+                  Next Game →
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </main>

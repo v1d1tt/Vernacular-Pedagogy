@@ -136,16 +136,36 @@ class EdgeModelManager:
     # ──────────────────────────────────────────────────────────────────────────
     def init_santali_asr(self):
         """
-        Loads thunderboltc/whisper-small-santali-ol-chiki from HuggingFace.
-        On first call, downloads and caches weights to models/whisper-small-santali/.
-        On subsequent calls, loads from the local cache for offline use.
+        Loads Santali ASR (thunderboltc/whisper-small-santali-ol-chiki).
+        1. PRIMARY: sherpa-onnx INT8 ONNX Runtime (if converted ONNX files exist).
+        2. FALLBACK: HuggingFace pipeline with local cache.
         """
+        enc = WHISPER_SANTALI_DIR / "small-encoder.int8.onnx"
+        dec = WHISPER_SANTALI_DIR / "small-decoder.int8.onnx"
+        tokens = WHISPER_SANTALI_DIR / "tokens.txt"
+
+        if enc.exists() and dec.exists() and tokens.exists():
+            try:
+                import sherpa_onnx
+                self._santali_recognizer = sherpa_onnx.OfflineRecognizer.from_whisper(
+                    encoder=str(enc),
+                    decoder=str(dec),
+                    tokens=str(tokens),
+                    language="sat",
+                    task="transcribe",
+                    num_threads=2
+                )
+                self._active_models["whisper_santali_asr"] = "ONLINE (sherpa-onnx whisper-small-santali INT8)"
+                logger.info("Santali ASR (sherpa-onnx INT8) loaded successfully.")
+                return
+            except Exception as e:
+                logger.error(f"Sherpa-onnx Santali ASR load error: {e}")
+
         try:
             from transformers import pipeline
 
             local_path = str(WHISPER_SANTALI_DIR)
-            # Use local cache if already downloaded, otherwise pull from HuggingFace
-            model_source = local_path if WHISPER_SANTALI_DIR.exists() else WHISPER_SANTALI_HF_ID
+            model_source = local_path if (WHISPER_SANTALI_DIR / "config.json").exists() else WHISPER_SANTALI_HF_ID
 
             logger.info(f"Loading Santali ASR from: {model_source}")
             self._active_models["whisper_santali_asr"] = "LOADING..."
@@ -157,46 +177,46 @@ class EdgeModelManager:
                 device="cpu",
             )
 
-            # Persist to local cache after first download so server can start offline
-            if not WHISPER_SANTALI_DIR.exists():
-                logger.info(f"Caching Santali model to {WHISPER_SANTALI_DIR}")
-                WHISPER_SANTALI_DIR.mkdir(parents=True, exist_ok=True)
-                self._santali_pipeline.model.save_pretrained(local_path)
-                self._santali_pipeline.feature_extractor.save_pretrained(local_path)
-                self._santali_pipeline.tokenizer.save_pretrained(local_path)
-
             self._active_models["whisper_santali_asr"] = "ONLINE (whisper-small-santali-ol-chiki)"
-            logger.info("Santali ASR pipeline (whisper-small-santali-ol-chiki) loaded successfully.")
+            logger.info("Santali ASR pipeline loaded successfully.")
         except Exception as e:
             logger.error(f"Failed to load Santali ASR pipeline: {e}")
-            self._active_models["whisper_santali_asr"] = f"ERROR: {e}"
+            self._active_models["whisper_santali_asr"] = f"STANDBY (offline mode)"
 
     def _transcribe_santali(self, audio_data: np.ndarray, sample_rate: int = 16000) -> str:
         """
-        Runs the real whisper-small-santali-ol-chiki pipeline on audio_data.
-        Returns native Ol Chiki script text. Re-initialises pipeline if needed.
+        Runs Santali ASR. Output: native Ol Chiki script.
         """
+        if hasattr(self, "_santali_recognizer") and self._santali_recognizer is not None:
+            try:
+                stream = self._santali_recognizer.create_stream()
+                stream.accept_waveform(sample_rate, audio_data.astype(np.float32))
+                self._santali_recognizer.decode_stream(stream)
+                text = stream.result.text.strip()
+                if text in ["[silence]", "[sil", "[music]", ""]:
+                    return ""
+                return text
+            except Exception as e:
+                logger.error(f"Sherpa Santali ASR error: {e}")
+
         if self._santali_pipeline is None:
             self.init_santali_asr()
-        if self._santali_pipeline is None:
-            logger.error("Santali ASR pipeline unavailable.")
-            return ""
-        try:
-            # HuggingFace pipeline expects {"array": float32_ndarray, "sampling_rate": int}
-            audio_input = {
-                "array": audio_data.astype(np.float32),
-                "sampling_rate": sample_rate,
-            }
-            result = self._santali_pipeline(audio_input)
-            text = result.get("text", "").strip()
-            # Filter out common empty/noise outputs
-            if text.lower() in ["", "[silence]", "[sil]", "[music]", "[ silence ]"]:
-                return ""
-            logger.info(f"Santali ASR output: '{text}'")
-            return text
-        except Exception as e:
-            logger.error(f"Santali ASR inference error: {e}")
-            return ""
+        if self._santali_pipeline is not None:
+            try:
+                audio_input = {
+                    "array": audio_data.astype(np.float32),
+                    "sampling_rate": sample_rate,
+                }
+                result = self._santali_pipeline(audio_input)
+                text = result.get("text", "").strip()
+                if text.lower() in ["", "[silence]", "[sil]", "[music]", "[ silence ]"]:
+                    return ""
+                logger.info(f"Santali ASR output: '{text}'")
+                return text
+            except Exception as e:
+                logger.error(f"Santali ASR inference error: {e}")
+
+        return ""
 
     def transcribe(self, audio_data: np.ndarray, sample_rate: int = 16000, language: str = "hi") -> str:
         """
@@ -226,12 +246,16 @@ class EdgeModelManager:
             return ""
 
     # ──────────────────────────────────────────────────────────────────────────
-    # Neural TTS: Piper VITS ONNX Runtime
+    # Neural TTS: Piper VITS ONNX Runtime (Female Voice — Priyamvada)
+    # Primary: Offline Piper VITS (priyamvada female), Fallback: gTTS (online)
     # ──────────────────────────────────────────────────────────────────────────
     def init_tts(self):
         try:
             import sherpa_onnx
-            model_path = PIPER_TTS_DIR / "hi_IN-pratham-medium.onnx"
+            # Prefer female voice (priyamvada), fall back to male (pratham)
+            female_model = PIPER_TTS_DIR / "hi_IN-priyamvada-medium.onnx"
+            male_model = PIPER_TTS_DIR / "hi_IN-pratham-medium.onnx"
+            model_path = female_model if female_model.exists() else male_model
             tokens_path = PIPER_TTS_DIR / "tokens.txt"
             data_dir = PIPER_TTS_DIR / "espeak-ng-data"
 
@@ -249,8 +273,9 @@ class EdgeModelManager:
                 )
                 config = sherpa_onnx.OfflineTtsConfig(model=model_config)
                 self._tts = sherpa_onnx.OfflineTts(config)
-                self._active_models["piper_vits_tts"] = "ONLINE (hi_IN-pratham-medium)"
-                logger.info("Piper VITS Neural TTS initialized successfully.")
+                voice_name = model_path.stem  # hi_IN-priyamvada-medium or hi_IN-pratham-medium
+                self._active_models["piper_vits_tts"] = f"ONLINE ({voice_name})"
+                logger.info(f"Piper VITS Neural TTS initialized: {voice_name}")
             else:
                 logger.warning("Piper VITS Hindi model files not found locally.")
         except Exception as e:
@@ -258,32 +283,48 @@ class EdgeModelManager:
 
     def synthesize_speech(self, text: str, language: str = "hi", speed: float = 1.0) -> Optional[bytes]:
         """
-        Synthesizes offline speech with Piper VITS neural voice and returns standard WAV bytes.
+        Synthesizes speech. Strategy:
+        1. PRIMARY (offline): Piper VITS ONNX — female Hindi voice (priyamvada)
+        2. FALLBACK (online-only): gTTS — only used when Piper fails AND network is available
         """
         if not text or not text.strip():
             return None
+
+        # 1. PRIMARY: Offline Piper VITS (female voice)
         if self._tts is None:
             self.init_tts()
-        if self._tts is None:
-            return None
+        if self._tts is not None:
+            try:
+                import io
+                import wave
+                audio = self._tts.generate(text.strip(), sid=0, speed=speed)
+                if audio and len(audio.samples) > 0:
+                    samples = np.array(audio.samples)
+                    samples_int16 = (samples * 32767).clip(-32768, 32767).astype(np.int16)
+                    buf = io.BytesIO()
+                    with wave.open(buf, "wb") as wf:
+                        wf.setnchannels(1)
+                        wf.setsampwidth(2)
+                        wf.setframerate(audio.sample_rate)
+                        wf.writeframes(samples_int16.tobytes())
+                    return buf.getvalue()
+            except Exception as e:
+                logger.error(f"Piper TTS error: {e}")
 
+        # 2. FALLBACK: gTTS (requires internet — only used if Piper fails)
         try:
+            from gtts import gTTS
             import io
-            import wave
-            audio = self._tts.generate(text.strip(), sid=0, speed=speed)
-            if not audio or len(audio.samples) == 0:
-                return None
-            samples_int16 = (np.array(audio.samples) * 32767).clip(-32768, 32767).astype(np.int16)
-            buf = io.BytesIO()
-            with wave.open(buf, "wb") as wf:
-                wf.setnchannels(1)
-                wf.setsampwidth(2)
-                wf.setframerate(audio.sample_rate)
-                wf.writeframes(samples_int16.tobytes())
-            return buf.getvalue()
+            gtts_lang = language if language in ["hi", "bn", "mr", "ta", "te", "en"] else "hi"
+            tts = gTTS(text=text.strip(), lang=gtts_lang)
+            fp = io.BytesIO()
+            tts.write_to_fp(fp)
+            logger.info("Used gTTS fallback (online) for speech synthesis.")
+            return fp.getvalue()
         except Exception as e:
-            logger.error(f"TTS synthesis error: {e}")
-            return None
+            logger.warning(f"gTTS fallback also failed (expected offline): {e}")
+
+        return None
 
     # ──────────────────────────────────────────────────────────────────────────
     # SLM: SmolLM2-360M-Instruct ONNX with Dynamic Swapping

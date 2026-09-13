@@ -2,16 +2,21 @@ export interface Language {
   code: string;
   name: string;
   nativeName: string;
+  category?: "PRIMARY" | "TRIBAL_FUTURE" | "EXTENDED";
+  disabled?: boolean;
+  badge?: string;
 }
 
 export const SUPPORTED_LANGUAGES: Language[] = [
-  { code: 'hi', name: 'Hindi', nativeName: 'हिंदी' },
-  { code: 'bn', name: 'Bengali', nativeName: 'বাংলা' },
-  { code: 'mr', name: 'Marathi', nativeName: 'मराठी' },
-  { code: 'ta', name: 'Tamil', nativeName: 'தமிழ்' },
-  { code: 'te', name: 'Telugu', nativeName: 'తెలుగు' },
-  { code: 'sat', name: 'Santali', nativeName: 'ᱥᱟᱱᱛᱟᱲᱤ' },
-  { code: 'en', name: 'English', nativeName: 'English' }
+  { code: 'hi', name: 'Hindi', nativeName: 'हिंदी', category: 'PRIMARY' },
+  { code: 'sat', name: 'Santali', nativeName: 'ᱥᱟᱱᱛᱟᱲᱤ (Ol Chiki)', category: 'PRIMARY' },
+  { code: 'en', name: 'English', nativeName: 'English', category: 'PRIMARY' },
+  { code: 'hoc', name: 'Ho', nativeName: '𑢹𑣉 (Warang Chiti)', category: 'TRIBAL_FUTURE', disabled: true, badge: 'Soon' },
+  { code: 'unr', name: 'Mundari', nativeName: 'Mundari Bani', category: 'TRIBAL_FUTURE', disabled: true, badge: 'Soon' },
+  { code: 'bn', name: 'Bengali', nativeName: 'বাংলা', category: 'EXTENDED' },
+  { code: 'mr', name: 'Marathi', nativeName: 'मराठी', category: 'EXTENDED' },
+  { code: 'ta', name: 'Tamil', nativeName: 'தமிழ்', category: 'EXTENDED' },
+  { code: 'te', name: 'Telugu', nativeName: 'తెలుగు', category: 'EXTENDED' }
 ];
 
 export interface NipunOutcome {

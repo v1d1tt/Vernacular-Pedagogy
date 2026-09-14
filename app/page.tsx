@@ -33,9 +33,8 @@ export default function VaaniSetuOnboarding() {
   const [loginPassword, setLoginPassword] = useState("");
   const [showLoginPwd, setShowLoginPwd] = useState(false);
 
-  // Signup: name, subject, grade, school, password, confirm password
+  // Signup: name, grade, school, password, confirm password
   const [signupName, setSignupName] = useState("");
-  const [signupSubject, setSignupSubject] = useState("");
   const [signupGrade, setSignupGrade] = useState<number>(2);
   const [signupSchool, setSignupSchool] = useState("");
   const [signupPassword, setSignupPassword] = useState("");
@@ -87,11 +86,10 @@ export default function VaaniSetuOnboarding() {
     void runServerDetect();
   }, [setLang]);
 
-  const handleSelectLanguage = (code: string) => setLang(code as LanguageCode);
-
-  const handleContinueLanguage = () => {
-    const langObj = SUPPORTED_LANGUAGES.find((l) => l.code === lang) || SUPPORTED_LANGUAGES[0];
-    localStorage.setItem("user_lang", lang);
+  const handleSelectLanguage = (code: string) => {
+    setLang(code as LanguageCode);
+    const langObj = SUPPORTED_LANGUAGES.find((l) => l.code === code) || SUPPORTED_LANGUAGES[0];
+    localStorage.setItem("user_lang", code);
     localStorage.setItem("user_lang_name", langObj.name);
     setStep(2);
   };
@@ -129,7 +127,7 @@ export default function VaaniSetuOnboarding() {
 
   // ── Teacher Signup ───────────────────────────────────────────────
   const handleTeacherSignup = async () => {
-    if (!signupName.trim() || !signupSubject.trim() || !signupSchool.trim() || !signupPassword.trim()) return;
+    if (!signupName.trim() || !signupSchool.trim() || !signupPassword.trim()) return;
     if (signupPassword !== signupConfirmPassword) {
       setAuthError(t("passwordMismatchError"));
       return;
@@ -140,7 +138,7 @@ export default function VaaniSetuOnboarding() {
       const res = await teacherSignup({
         name: signupName.trim(),
         password: signupPassword,
-        subject: signupSubject.trim(),
+        subject: "General",
         grade: signupGrade,
         school_name: signupSchool.trim(),
         preferred_language: lang,
@@ -151,7 +149,7 @@ export default function VaaniSetuOnboarding() {
       localStorage.setItem("user_lang", lang);
       localStorage.setItem("user_lang_name", langObj.name);
       localStorage.setItem("user_grade", String(signupGrade));
-      localStorage.setItem("user_subject", signupSubject.trim());
+      localStorage.setItem("user_subject", "General");
       localStorage.setItem("user_school", signupSchool.trim());
       router.push("/teacher");
     } catch (err: unknown) {
@@ -397,53 +395,31 @@ export default function VaaniSetuOnboarding() {
 
               {/* Primary language buttons: Hindi, Santali, English */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {primaryLanguages.map((lItem) => {
-                  const isSelected = lang === lItem.code;
-                  return (
-                    <button
-                      key={lItem.code}
-                      id={`lang-primary-${lItem.code}`}
-                      onClick={() => handleSelectLanguage(lItem.code)}
-                      className={`p-4 rounded-2xl border-2 text-left transition-all flex flex-col justify-between h-28 ${
-                        isSelected
-                          ? "border-[var(--brand)] bg-[var(--brand-tint)] shadow-md ring-2 ring-[var(--brand-tint2)]"
-                          : "border-[var(--border)] bg-[var(--surface-2)] hover:border-[var(--brand)]"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-[var(--brand-deep)] uppercase tracking-wider">{lItem.script}</span>
-                        {isSelected && (
-                          <div className="w-6 h-6 rounded-full bg-[var(--brand)] text-[#0c1a2e] flex items-center justify-center">
-                            <Check className="w-3.5 h-3.5" />
-                          </div>
-                        )}
-                      </div>
-                      <div>
-                        <p className="text-lg font-black text-[var(--text-primary)] leading-tight">{lItem.nativeName}</p>
-                        <p className="text-xs font-bold text-[var(--text-muted)] mt-0.5">{lItem.name}</p>
-                      </div>
-                    </button>
-                  );
-                })}
+                {primaryLanguages.map((lItem) => (
+                  <button
+                    key={lItem.code}
+                    id={`lang-primary-${lItem.code}`}
+                    onClick={() => handleSelectLanguage(lItem.code)}
+                    className="p-4 rounded-2xl border-2 border-[var(--border)] bg-[var(--surface-2)] hover:border-[var(--brand)] hover:bg-[var(--brand-tint)]/40 text-left transition-all flex flex-col justify-between h-28 shadow-2xs active:scale-95"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-[var(--brand-deep)] uppercase tracking-wider">{lItem.script}</span>
+                    </div>
+                    <div>
+                      <p className="text-lg font-black text-[var(--text-primary)] leading-tight">{lItem.nativeName}</p>
+                      <p className="text-xs font-bold text-[var(--text-muted)] mt-0.5">{lItem.name}</p>
+                    </div>
+                  </button>
+                ))}
               </div>
 
-              {/* Button to choose role */}
-              <button
-                id="btn-proceed-to-role"
-                onClick={handleContinueLanguage}
-                className="vs-btn-brand w-full py-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 shadow-lg"
-              >
-                {t("proceedToRole")}
-              </button>
-
-              {/* Other regional languages — below primary buttons and proceed button */}
+              {/* Other regional languages — below primary buttons */}
               <div className="space-y-2 pt-4 border-t border-[var(--border)]">
                 <label className="text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider block">
                   Other Languages / अन्य भाषाएं
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {SUPPORTED_LANGUAGES.filter((l) => !["hi", "sat", "en"].includes(l.code)).map((langItem) => {
-                    const sel = lang === langItem.code;
                     const dis = langItem.disabled;
                     return (
                       <button
@@ -451,10 +427,10 @@ export default function VaaniSetuOnboarding() {
                         id={`lang-other-${langItem.code}`}
                         disabled={dis}
                         onClick={() => !dis && handleSelectLanguage(langItem.code)}
-                        className={`p-2.5 rounded-xl border text-left transition ${
-                          dis ? "opacity-50 cursor-not-allowed border-[var(--border)] bg-[var(--surface-2)]"
-                          : sel ? "border-[var(--brand)] bg-[var(--brand-tint)] font-bold text-[var(--brand-deep)]"
-                          : "border-[var(--border)] bg-[var(--surface-2)] hover:border-[var(--brand)] text-[var(--text-primary)]"
+                        className={`p-2.5 rounded-xl border text-left transition active:scale-95 ${
+                          dis
+                            ? "opacity-50 cursor-not-allowed border-[var(--border)] bg-[var(--surface-2)]"
+                            : "border-[var(--border)] bg-[var(--surface-2)] hover:border-[var(--brand)] hover:bg-[var(--brand-tint)]/40 text-[var(--text-primary)]"
                         }`}
                       >
                         <div className="text-xs font-bold flex items-center justify-between">
@@ -634,15 +610,6 @@ export default function VaaniSetuOnboarding() {
                         className="vs-input w-full px-4 py-3 rounded-xl text-sm font-medium" />
                     </div>
 
-                    {/* Subject */}
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider block">{t("subjectLabel")}</label>
-                      <input id="input-signup-subject" type="text" value={signupSubject}
-                        onChange={(e) => setSignupSubject(e.target.value)}
-                        placeholder={t("subjectPlaceholder")}
-                        className="vs-input w-full px-4 py-3 rounded-xl text-sm font-medium" />
-                    </div>
-
                     {/* Grade */}
                     <div className="space-y-1">
                       <label className="text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider block">{t("gradeLabel")}</label>
@@ -697,7 +664,7 @@ export default function VaaniSetuOnboarding() {
                   )}
 
                   <button id="btn-signup-complete" onClick={handleTeacherSignup}
-                    disabled={isLoading || !signupName.trim() || !signupSubject.trim() || !signupSchool.trim() || !signupPassword.trim() || !signupConfirmPassword.trim()}
+                    disabled={isLoading || !signupName.trim() || !signupSchool.trim() || !signupPassword.trim() || !signupConfirmPassword.trim()}
                     className="vs-btn-brand w-full py-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 shadow-lg transition disabled:opacity-50">
                     {isLoading ? "..." : t("teacherSignupBtn")}
                   </button>

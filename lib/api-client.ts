@@ -5,14 +5,30 @@ let lastDetectAt = 0;
 const STORAGE_KEY = "edge_server_url";
 const CUSTOM_PORT = 8000;
 
+export function normalizeServerUrl(rawUrl: string): string {
+  let clean = rawUrl.trim().replace(/\/+$/, "");
+  if (!clean) return "http://localhost:8000";
+  if (!/^https?:\/\//i.test(clean)) {
+    clean = "http://" + clean;
+  }
+  try {
+    const urlObj = new URL(clean);
+    // If user entered IP like 192.0.0.3 without a port, append default :8000
+    const hasPortInHost = urlObj.host.includes(":");
+    if (!urlObj.port && !hasPortInHost) {
+      clean = `${urlObj.protocol}//${urlObj.hostname}:${CUSTOM_PORT}${urlObj.pathname}`;
+    }
+  } catch {}
+  return clean.replace(/\/+$/, "");
+}
+
 export function setEdgeServerUrl(url: string) {
-  const clean = url.trim().replace(/\/+$/, "");
-  if (!/^https?:\/\/.+/.test(clean)) throw new Error("URL must start with http:// or https://");
-  activeEdgeUrl = clean;
+  const normalized = normalizeServerUrl(url);
+  activeEdgeUrl = normalized;
   lastDetectOk = true;
   lastDetectAt = Date.now();
   try {
-    localStorage.setItem(STORAGE_KEY, clean);
+    localStorage.setItem(STORAGE_KEY, normalized);
   } catch {}
 }
 
@@ -36,7 +52,7 @@ export const getEdgeCandidates = (): string[] => {
   // 1. Explicit ?server= query param (lets teacher share a link / QR)
   try {
     const qp = new URLSearchParams(window.location.search).get("server");
-    if (qp && /^https?:\/\//.test(qp.trim())) list.push(qp.trim().replace(/\/+$/, ""));
+    if (qp) list.push(normalizeServerUrl(qp));
   } catch {}
 
   // 2. Manually configured override (persists across reloads)
@@ -47,7 +63,10 @@ export const getEdgeCandidates = (): string[] => {
       return null;
     }
   })();
-  if (stored && /^https?:\/\//.test(stored.trim())) list.push(stored.trim().replace(/\/+$/, ""));
+  if (stored) list.push(normalizeServerUrl(stored));
+
+  // 3. Cached active edge URL
+  if (activeEdgeUrl) list.push(normalizeServerUrl(activeEdgeUrl));
 
   const isCapacitor =
     typeof navigator !== "undefined" &&
@@ -57,32 +76,29 @@ export const getEdgeCandidates = (): string[] => {
   const host = window.location.hostname || "localhost";
   const isLocalHost = host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" || host === "";
 
+  if (!isLocalHost) {
+    // App is served from LAN host (e.g. http://192.0.0.3:3000) —
+    // the edge server MUST be probed on port 8000 at the same IP (http://192.0.0.3:8000)
+    list.push(`http://${host}:${CUSTOM_PORT}`);
+  }
+
   if (isCapacitor) {
-    // Android emulator host loopback
+    // Android emulator host loopback & ADB reverse
     list.push("http://10.0.2.2:8000");
-    // adb reverse
     list.push("http://localhost:8000");
     list.push("http://127.0.0.1:8000");
-    // Common Android-hotspot / LAN gateways (teacher phone hotspot)
+    // Common hotspot gateways
     list.push("http://192.168.43.1:8000");
     list.push("http://192.168.49.1:8000");
     list.push("http://192.168.137.1:8000");
     list.push("http://192.168.0.1:8000");
-  } else if (!isLocalHost) {
-    // App itself is served from LAN host (e.g. http://192.168.1.5:3000) —
-    // the edge server almost always runs on the SAME host. Try it first.
-    list.push(`http://${host}:${CUSTOM_PORT}`);
+    list.push("http://192.0.0.1:8000");
   }
 
-  // Previously-known LAN IP (kept for backwards compat, probed last)
-  list.push("http://192.168.1.191:8000");
+  list.push("http://localhost:8000");
+  list.push("http://127.0.0.1:8000");
 
-  if (!isCapacitor) {
-    list.push("http://localhost:8000");
-    list.push("http://127.0.0.1:8000");
-  }
-
-  return Array.from(new Set(list));
+  return Array.from(new Set(list.map(normalizeServerUrl)));
 };
 
 export const getEdgeServerUrl = (): string => {
@@ -289,6 +305,40 @@ export async function broadcastSpeech(data: {
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error("Broadcast failed — edge server unreachable");
+  return await res.json();
+}
+
+export async function streamAudioChunk(data: {
+  session_id: string;
+  speaker_name: string;
+  speaker_role: string;
+  source_lang: string;
+  audio_base64: string;
+  seq_num: number;
+  is_final: boolean;
+}) {
+  const base = await ensureServer();
+  const res = await fetch(`${base}/api/speech/stream-chunk`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Stream chunk processing failed");
+  return await res.json();
+}
+
+export async function updateTeacherMicState(data: {
+  session_id: string;
+  is_live: boolean;
+  speaker_name: string;
+}) {
+  const base = await ensureServer();
+  const res = await fetch(`${base}/api/speech/mic-state`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Failed to update teacher mic state");
   return await res.json();
 }
 

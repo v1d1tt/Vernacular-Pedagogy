@@ -172,6 +172,7 @@ export default function StudentConsole() {
   const [showCodeModal, setShowCodeModal] = useState(false);
   const [newCodeInput, setNewCodeInput] = useState("");
   const [codeError, setCodeError] = useState("");
+  const [teacherMicLive, setTeacherMicLive] = useState(false);
   const [activeTab, setActiveTab] = useState<"LISTEN" | "QUIZ" | "WORKSHEET" | "FLASHCARDS" | "GAMES">("LISTEN");
   const [gameScore, setGameScore] = useState<number>(0);
   const [activeGameIndex, setActiveGameIndex] = useState<number>(0);
@@ -437,6 +438,8 @@ export default function StudentConsole() {
                 setRaisedHand(false);
               }
             }
+          } else if (msg.type === "TEACHER_MIC_STATE") {
+            setTeacherMicLive(Boolean(msg.is_live));
           } else if (msg.type === "ACTIVITY_APPROVED" || msg.type === "ACTIVITY_PUBLISHED_TO_CLASS") {
             const act = msg.activity as StudentActivity;
             if (act) {
@@ -952,8 +955,16 @@ export default function StudentConsole() {
             <div className="vs-surface rounded-2xl p-5 border border-[var(--border)] shadow-xs space-y-4">
               <div className="flex items-center justify-between pb-3 border-b border-[var(--border-sub)]">
                 <div className="flex items-center gap-2 text-xs text-[var(--text-muted)] font-bold">
-                  <span className="w-2 h-2 rounded-full bg-[var(--green)] animate-pulse" />
-                  <span>Teacher Broadcast</span>
+                  <span className={`px-2.5 py-1 rounded-full text-xs font-black flex items-center gap-1.5 ${
+                    teacherMicLive
+                      ? "bg-red-600 text-white animate-pulse shadow-sm"
+                      : "bg-[var(--surface-2)] text-[var(--text-muted)] border border-[var(--border)]"
+                  }`}>
+                    <span className={`w-2 h-2 rounded-full ${teacherMicLive ? "bg-white animate-ping" : "bg-gray-400"}`} />
+                    {teacherMicLive
+                      ? t("micLive") || "● LIVE MIC"
+                      : t("teacherMuted") || "Teacher Mic OFF"}
+                  </span>
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--surface-2)] uppercase">
                     {teacherLang}
                   </span>

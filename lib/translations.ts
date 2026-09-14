@@ -205,6 +205,13 @@ export const TRANSLATIONS: Record<LanguageCode, Record<string, string>> = {
     wellDoneTitle: "Well done! Great job!",
     wellDoneSub: "Score saved · synced offline",
     pronounce: "Pronounce",
+
+    // Live Streaming Mic
+    micOn: "Mic ON",
+    micOff: "Mic OFF",
+    micLive: "● LIVE MIC",
+    finishingTranslation: "Finishing translation for students...",
+    teacherMuted: "Teacher mic is turned off",
   },
 
   hi: {
@@ -385,6 +392,13 @@ export const TRANSLATIONS: Record<LanguageCode, Record<string, string>> = {
     wellDoneTitle: "शाबाश! बहुत बढ़िया!",
     wellDoneSub: "अंक सुरक्षित · ऑफ़लाइन सहेजा गया",
     pronounce: "उच्चारण सुनें",
+
+    // Live Streaming Mic
+    micOn: "माइक चालू (ON)",
+    micOff: "माइक बंद (OFF)",
+    micLive: "● सजीव माइक (LIVE)",
+    finishingTranslation: "छात्रों के लिए अनुवाद पूरा किया जा रहा है...",
+    teacherMuted: "शिक्षक का माइक बंद है",
   },
 
   bn: {
@@ -546,6 +560,13 @@ export const TRANSLATIONS: Record<LanguageCode, Record<string, string>> = {
     wellDoneTitle: "সাবাশ! খুব ভালো হয়েছে!",
     wellDoneSub: "নম্বর সংরক্ষিত · অফলাইনে সিঙ্ক হয়েছে",
     pronounce: "উচ্চারণ শুনুন",
+
+    // Live Streaming Mic
+    micOn: "মাইক চালু (ON)",
+    micOff: "মাইক বন্ধ (OFF)",
+    micLive: "● লাইভ মাইক (LIVE)",
+    finishingTranslation: "শিক্ষার্থীদের জন্য অনুবাদ শেষ করা হচ্ছে...",
+    teacherMuted: "শিক্ষকের মাইক বন্ধ রয়েছে",
   },
 
   mr: {
@@ -707,6 +728,13 @@ export const TRANSLATIONS: Record<LanguageCode, Record<string, string>> = {
     wellDoneTitle: "शाब्बास! खूप छान!",
     wellDoneSub: "गुण जतन केले · ऑफलाइन सिंक",
     pronounce: "उच्चार ऐका",
+
+    // Live Streaming Mic
+    micOn: "माईक चालू (ON)",
+    micOff: "माईक बंद (OFF)",
+    micLive: "● थेट माईक (LIVE)",
+    finishingTranslation: "विद्यार्थ्यांसाठी भाषांतर पूर्ण होत आहे...",
+    teacherMuted: "शिक्षकांचा माईक बंद आहे",
   },
 
   ta: {
@@ -868,6 +896,13 @@ export const TRANSLATIONS: Record<LanguageCode, Record<string, string>> = {
     wellDoneTitle: "அருமை! நன்று!",
     wellDoneSub: "மதிப்பெண் சேமிக்கப்பட்டது · ஆஃப்லைனில்",
     pronounce: "உச்சரிப்பு",
+
+    // Live Streaming Mic
+    micOn: "மைக் ஆன் (ON)",
+    micOff: "மைக் ஆஃப் (OFF)",
+    micLive: "● நேரலை மைக் (LIVE)",
+    finishingTranslation: "மாணவர்களுக்கான மொழிபெயர்ப்பு நிறைவடைகிறது...",
+    teacherMuted: "ஆசிரியரின் மைக் ஆஃப் செய்யப்பட்டுள்ளது",
   },
 
   te: {
@@ -1029,6 +1064,13 @@ export const TRANSLATIONS: Record<LanguageCode, Record<string, string>> = {
     wellDoneTitle: "శభాష్! చాలా బాగుంది!",
     wellDoneSub: "స్కోర్ భద్రపరచబడింది · ఆఫ్‌లైన్‌లో సమకాలీకరించబడింది",
     pronounce: "ఉచ్చారణ వినండి",
+
+    // Live Streaming Mic
+    micOn: "మైక్ ఆన్ (ON)",
+    micOff: "మైక్ ఆఫ్ (OFF)",
+    micLive: "● లైవ్ మైక్ (LIVE)",
+    finishingTranslation: "విద్యార్థుల కోసం అనువాదం పూర్తి అవుతోంది...",
+    teacherMuted: "ఉపాధ్యాయుడి మైక్ ఆఫ్ చేయబడింది",
   },
 
   sat: {
@@ -1209,5 +1251,12 @@ export const TRANSLATIONS: Record<LanguageCode, Record<string, string>> = {
     wellDoneTitle: "ᱟᱹᱰᱤ ᱱᱟᱯᱟᱭ! ᱵᱮᱥ ᱮᱢ ᱠᱟᱹᱢᱤ ᱠᱮᱫᱟ!",
     wellDoneSub: "ᱱᱚᱢᱵᱚᱨ ᱡᱚᱜᱟᱣ ᱮᱱᱟ · ᱚᱯᱷᱞᱟᱭᱤᱱ ᱨᱮ",
     pronounce: "ᱨᱚᱲ ᱟᱸᱡᱚᱢ ᱢᱮ",
+
+    // Live Streaming Mic
+    micOn: "ᱢᱟᱭᱤᱠ ᱪᱟᱹᱞᱩ (ON)",
+    micOff: "ᱢᱟᱭᱤᱠ ᱵᱚᱸᱫᱽ (OFF)",
+    micLive: "● ᱞᱟᱭᱤᱵᱷ ᱢᱟᱭᱤᱠ (LIVE)",
+    finishingTranslation: "ᱯᱟᱹᱴᱷᱩᱣᱟᱹ ᱠᱚ ᱞᱟᱹᱜᱤᱫ ᱛᱚᱨᱡᱚᱢᱟ ᱯᱩᱨᱟᱹᱣᱜ ᱠᱟᱱᱟ...",
+    teacherMuted: "ᱢᱟᱪᱮᱫ ᱟᱜ ᱢᱟᱭᱤᱠ ᱵᱚᱸᱫᱽ ᱜᱮᱭᱟ",
   },
 };

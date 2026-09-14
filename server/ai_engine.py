@@ -174,13 +174,31 @@ def parse_voice_command(text: str) -> Optional[Dict[str, Any]]:
 def transcribe_audio_chunk(audio_array: np.ndarray, sample_rate: int = 16000, lang: str = "hi") -> Dict[str, Any]:
     """
     Runs real Silero VAD and ASR pipeline.
+    - Fast noise pre-filter (RMS/Energy check) to skip CPU compute on background silence
     - Santali (sat): whisper-small-santali-ol-chiki -> native Ol Chiki script
     - All other languages: sherpa-onnx Whisper-Tiny INT8
     """
     t_start = time.time()
 
+    if audio_array is None or len(audio_array) == 0:
+        return {
+            "text": "",
+            "is_speech": False,
+            "latency_seconds": 0.0
+        }
+
+    # 0. Noise / Silence Fast Pre-filtering
+    max_amp = np.max(np.abs(audio_array))
+    mean_amp = np.mean(np.abs(audio_array))
+    if max_amp < 0.012 or mean_amp < 0.0015:
+        return {
+            "text": "",
+            "is_speech": False,
+            "latency_seconds": round(time.time() - t_start, 3)
+        }
+
     # 1. Voice Activity Detection
-    has_speech = edge_ai.is_speech(audio_array[:512], sample_rate=sample_rate)
+    has_speech = edge_ai.is_speech(audio_array[:min(512, len(audio_array))], sample_rate=sample_rate)
     if not has_speech and len(audio_array) < 16000:
         return {
             "text": "",
@@ -197,7 +215,7 @@ def transcribe_audio_chunk(audio_array: np.ndarray, sample_rate: int = 16000, la
 
     return {
         "text": text,
-        "is_speech": bool(text.strip()),
+        "is_speech": bool(text and text.strip()),
         "latency_seconds": latency,
         "engine": engine,
         "detected_command": voice_cmd

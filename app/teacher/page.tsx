@@ -9,17 +9,18 @@ import {
   approveAiContent,
   approveSpeaking,
   connectWebSocket,
-  transcribeAudio,
   getEdgeServerUrl,
   detectActiveEdgeServer,
   setEdgeServerUrl,
   fetchTeacherSessions,
   endSession,
   reactivateSession,
+  streamAudioChunk,
+  updateTeacherMicState,
   SessionData,
   WSHandle,
 } from "@/lib/api-client";
-import { AudioRecorder } from "@/lib/audio-recorder";
+import { ContinuousAudioStreamer } from "@/lib/audio-streamer";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LanguageSwitch } from "@/components/language-switch";
 import { useLanguage } from "@/components/language-provider";
@@ -99,15 +100,15 @@ export default function TeacherConsole() {
   const [pendingActivities, setPendingActivities] = useState<ActivityItem[]>([]);
   const [publishedActivities, setPublishedActivities] = useState<ActivityItem[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const [isTranscribing, setIsTranscribing] = useState(false);
   const [micStatus, setMicStatus] = useState<string | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
   const [showClassroomsModal, setShowClassroomsModal] = useState(false);
   const [teacherClassrooms, setTeacherClassrooms] = useState<SessionData[]>([]);
   const [isLoadingClassrooms, setIsLoadingClassrooms] = useState(false);
 
-  const [recorder] = useState(() => (typeof window !== "undefined" ? new AudioRecorder() : null));
+  const [isMicLive, setIsMicLive] = useState(false);
+  const [isFlushing, setIsFlushing] = useState(false);
+  const streamerRef = useRef<ContinuousAudioStreamer | null>(null);
   const wsRef = useRef<WSHandle | null>(null);
   const activeSessionRef = useRef<SessionInfo | null>(null);
   const [serverUrl, setServerUrlState] = useState<string>("");
@@ -375,39 +376,90 @@ export default function TeacherConsole() {
     }
   };
 
-  const handleToggleRecord = async () => {
-    if (!activeSession || !recorder) return;
-    if (isRecording) {
-      setIsRecording(false);
-      setIsTranscribing(true);
-      setMicStatus("Transcribing with Whisper AI...");
+  const handleToggleMic = async () => {
+    if (!activeSession) return;
+
+    if (isMicLive) {
+      // 1. Turn OFF microphone immediately
+      setIsMicLive(false);
+      setIsFlushing(true);
+      setMicStatus(t("finishingTranslation") || "Finishing translation for students...");
+
+      // Update backend teacher mic state immediately
       try {
-        const b64Pcm = await recorder.stop();
-        if (b64Pcm) {
-          const result = await transcribeAudio(b64Pcm, teachingLang);
-          if (result && result.text) {
-            setSpeechText(result.text);
-            setMicStatus(`Transcribed: "${result.text}"`);
-            await handleBroadcastSpeech(result.text);
-          } else {
-            setMicStatus("No clear speech detected");
-          }
-        }
+        await updateTeacherMicState({
+          session_id: activeSession.session_id,
+          is_live: false,
+          speaker_name: teacherName,
+        });
       } catch (err) {
-        console.error("Mic recording error:", err);
-        setMicStatus("Microphone error");
-      } finally {
-        setIsTranscribing(false);
-        setTimeout(() => setMicStatus(null), 3000);
+        console.warn("Failed to update mic state:", err);
       }
+
+      // 2. Flush remaining audio buffer completely (ensures 100% spoken text is sent & translated)
+      if (streamerRef.current) {
+        try {
+          await streamerRef.current.flushAndStop();
+        } catch (err) {
+          console.error("Flush audio streamer error:", err);
+        }
+        streamerRef.current = null;
+      }
+
+      setIsFlushing(false);
+      setMicStatus(null);
     } else {
+      // Turn ON mic continuously
       try {
-        await recorder.start();
-        setIsRecording(true);
-        setMicStatus("Listening... (Tap mic to stop & broadcast)");
+        setActionError(null);
+        setIsMicLive(true);
+        setIsFlushing(false);
+        setMicStatus(t("micLive") || "● LIVE MIC");
+
+        // Notify backend teacher mic is live
+        try {
+          await updateTeacherMicState({
+            session_id: activeSession.session_id,
+            is_live: true,
+            speaker_name: teacherName,
+          });
+        } catch (err) {
+          console.warn("Failed to broadcast mic live state:", err);
+        }
+
+        const streamer = new ContinuousAudioStreamer();
+        streamerRef.current = streamer;
+
+        await streamer.start(async (base64Pcm, seqNum, isFinal) => {
+          if (!activeSessionRef.current) return;
+          try {
+            const res = await streamAudioChunk({
+              session_id: activeSessionRef.current.session_id,
+              speaker_name: teacherName,
+              speaker_role: "TEACHER",
+              source_lang: teachingLang,
+              audio_base64: base64Pcm,
+              seq_num: seqNum,
+              is_final: isFinal,
+            });
+            if (res && res.original_text) {
+              setTranscripts((prev) => {
+                if (prev.some((item) => item.original_text === res.original_text)) {
+                  return prev;
+                }
+                return [res as unknown as SpeechTranscript, ...prev];
+              });
+            }
+          } catch (err) {
+            console.error("Stream audio chunk error:", err);
+          }
+        });
       } catch (err) {
-        console.error("Mic start error:", err);
-        setMicStatus("Could not access microphone");
+        console.error("Failed to start mic streamer:", err);
+        setIsMicLive(false);
+        setIsFlushing(false);
+        const detail = err instanceof Error ? `${err.name}: ${err.message}` : "Could not access microphone";
+        setMicStatus(`Microphone error: ${detail}`);
       }
     }
   };
@@ -487,114 +539,122 @@ export default function TeacherConsole() {
   return (
     <div className="min-h-screen vs-bg flex flex-col">
       {/* ── Top Header ────────────────────────────────────────────── */}
-      <header className="vs-surface border-0 border-b border-[var(--border)] px-4 sm:px-6 py-3 flex items-center justify-between sticky top-0 z-30 shadow-xs">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => router.push("/")}
-            title="Back to Home"
-            className="p-2 rounded-xl hover:bg-[var(--surface-2)] text-[var(--text-secondary)] transition"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </button>
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center text-[#0c1a2e] text-base font-black bg-gradient-to-br from-[var(--brand)] to-amber-300 shadow-sm">
+      <header className="vs-surface border-0 border-b border-[var(--border)] px-3 sm:px-6 py-2.5 space-y-2 sticky top-0 z-30 shadow-xs">
+        {/* Top Row: Branding on left, Theme & Language & Classrooms on right */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => router.push("/")}
+              title="Back to Home"
+              className="p-1.5 rounded-lg hover:bg-[var(--surface-2)] text-[var(--text-secondary)] transition shrink-0"
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center text-[#0c1a2e] text-xs font-black bg-[var(--brand)] shadow-xs shrink-0">
               व
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <p className="text-sm font-extrabold text-[var(--text-primary)] leading-none">वाणीSetu</p>
-                <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-[var(--brand-tint)] text-[var(--brand-deep)]">
-                  Teacher
-                </span>
-              </div>
-              <p className="text-[11px] text-[var(--text-muted)] mt-0.5 font-medium">
-                {teacherName} · {t("class")} {grade} · {courseName}
-              </p>
+            <div className="flex items-center gap-1.5">
+              <p className="text-sm font-extrabold text-[var(--text-primary)] leading-none">वाणीSetu</p>
+              <span className="text-[9px] uppercase font-extrabold tracking-wider px-1.5 py-0.5 rounded bg-[var(--brand-tint)] text-[var(--brand-deep)]">
+                Teacher
+              </span>
             </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* My Classrooms Button */}
+            <button
+              onClick={handleOpenClassroomsModal}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] hover:bg-[var(--surface-1)] text-[var(--text-primary)] text-xs font-bold transition shadow-2xs"
+              title="View all classrooms created"
+            >
+              <Layers className="w-3.5 h-3.5 text-[var(--brand-deep)]" />
+              <span className="hidden xs:inline text-[11px]">{t("myClassrooms") || "Classrooms"}</span>
+            </button>
+            <LanguageSwitch />
+            <ThemeToggle />
           </div>
         </div>
 
-        <div className="flex items-center gap-2 sm:gap-3">
-          {/* Class Mode Switcher */}
-          <div className="hidden md:flex items-center bg-[var(--surface-2)] rounded-xl p-1 gap-1 border border-[var(--border)]">
-            {(["LECTURE", "Q_AND_A", "DISCUSSION"] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => setMode(m)}
-                className={`px-3 py-1.5 rounded-lg text-xs transition ${
-                  mode === m ? modeStyles[m] : "text-[var(--text-muted)] hover:text-[var(--text-primary)] font-medium"
-                }`}
-              >
-                {modeLabels[m]}
-              </button>
-            ))}
-          </div>
-
-          {/* My Classrooms Button */}
-          <button
-            onClick={handleOpenClassroomsModal}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] hover:bg-[var(--surface-1)] text-[var(--text-primary)] text-xs font-bold transition shadow-2xs"
-            title="View all classrooms created"
-          >
-            <Layers className="w-3.5 h-3.5 text-[var(--brand-deep)]" />
-            <span className="hidden sm:inline">{t("myClassrooms") || "Classrooms"}</span>
-          </button>
-
-          {/* Active Session Badge with Copyable Join Code */}
-          {activeSession ? (
-            <div className="flex items-center gap-2">
-              <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[var(--green-tint)] text-[var(--green)] text-xs font-bold border border-[var(--green-tint)]">
-                <Radio className="w-3 h-3 animate-pulse" /> {t("live") || "LIVE"}
-              </div>
-
-              {activeSession.join_code && (
-                <button
-                  onClick={() => handleCopyCode()}
-                  title="Click to copy Class Code"
-                  className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-[var(--brand)] to-amber-300 text-[#0c1a2e] text-xs font-black tracking-wide shadow-sm hover:brightness-105 active:scale-95 transition"
-                >
-                  <span className="text-[10px] font-bold opacity-80">CODE:</span>
-                  <span className="font-mono text-sm tracking-widest uppercase">{activeSession.join_code}</span>
-                  {codeCopied ? (
-                    <CheckCheck className="w-3.5 h-3.5 text-green-900" />
-                  ) : (
-                    <Copy className="w-3.5 h-3.5 opacity-80" />
-                  )}
-                </button>
-              )}
-
-              <button
-                onClick={handleEndSession}
-                title="End Classroom Session"
-                className="p-2 rounded-xl text-[var(--red)] hover:bg-[var(--red-tint)] border border-transparent hover:border-[var(--red-tint)] transition"
-              >
-                <Power className="w-4 h-4" />
-              </button>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2">
+        {/* Second Row: Teacher Info & Subject on left, Start Class / Active Session on right */}
+        <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-[var(--border-sub)]">
+          <div className="flex items-center gap-1.5 min-w-0 flex-1">
+            <span className="text-[11px] font-bold text-[var(--text-muted)] truncate shrink-0">
+              {teacherName} · {t("class")} {grade}
+            </span>
+            <span className="text-[var(--text-muted)] text-[10px]">·</span>
+            {!activeSession ? (
               <select
                 value={courseName}
                 onChange={(e) => setCourseName(e.target.value)}
-                className="vs-input px-3 py-1.5 rounded-xl text-xs font-bold border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-primary)] cursor-pointer"
+                className="vs-input px-2 py-1 rounded-lg text-xs font-bold border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-primary)] cursor-pointer outline-none max-w-[140px] sm:max-w-[210px] truncate"
               >
-                <option value="Mathematics">📐 Mathematics (गणित / ᱮᱞᱠᱷᱟ)</option>
-                <option value="Literacy & Language">📚 Literacy & Language (साक्षरता / ᱚᱞ)</option>
-                <option value="EVS & Science">🌿 EVS & Science (पर्यावरण / ᱯᱚᱨᱤᱵᱮᱥ)</option>
-                <option value="General Knowledge">💡 General Knowledge (सामान्य ज्ञान)</option>
+                <option value="Mathematics">📐 Mathematics</option>
+                <option value="Literacy & Language">📚 Literacy & Language</option>
+                <option value="EVS & Science">🌿 EVS & Science</option>
+                <option value="General Knowledge">💡 General Knowledge</option>
               </select>
+            ) : (
+              <span className="font-bold text-xs text-[var(--brand-deep)] truncate">{courseName}</span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Class Mode Switcher (on md+ screens) */}
+            <div className="hidden md:flex items-center bg-[var(--surface-2)] rounded-xl p-0.5 gap-1 border border-[var(--border)]">
+              {(["LECTURE", "Q_AND_A", "DISCUSSION"] as const).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setMode(m)}
+                  className={`px-2.5 py-1 rounded-lg text-xs transition ${
+                    mode === m ? modeStyles[m] : "text-[var(--text-muted)] hover:text-[var(--text-primary)] font-medium"
+                  }`}
+                >
+                  {modeLabels[m]}
+                </button>
+              ))}
+            </div>
+
+            {activeSession ? (
+              <div className="flex items-center gap-1.5">
+                <div className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--green-tint)] text-[var(--green)] text-xs font-bold border border-[var(--green-tint)]">
+                  <Radio className="w-3 h-3 animate-pulse" /> {t("live") || "LIVE"}
+                </div>
+
+                {activeSession.join_code && (
+                  <button
+                    onClick={() => handleCopyCode()}
+                    title="Click to copy Class Code"
+                    className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-[var(--brand)] text-[#0c1a2e] text-xs font-black tracking-wide shadow-xs hover:brightness-105 active:scale-95 transition"
+                  >
+                    <span className="text-[10px] font-bold opacity-80">CODE:</span>
+                    <span className="font-mono text-xs tracking-wider uppercase">{activeSession.join_code}</span>
+                    {codeCopied ? (
+                      <CheckCheck className="w-3.5 h-3.5 text-green-900" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5 opacity-80" />
+                    )}
+                  </button>
+                )}
+
+                <button
+                  onClick={handleEndSession}
+                  title="End Classroom Session"
+                  className="p-1.5 rounded-lg text-[var(--red)] hover:bg-[var(--red-tint)] border border-transparent hover:border-[var(--red-tint)] transition"
+                >
+                  <Power className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
               <button
                 onClick={handleStartSession}
-                className="vs-btn-brand px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-sm"
+                className="vs-btn-brand px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 shadow-xs whitespace-nowrap"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>{t("startClassBtn") || "Start Class"}</span>
               </button>
-            </div>
-          )}
-
-          <LanguageSwitch />
-          <ThemeToggle />
+            )}
+          </div>
         </div>
       </header>
 
@@ -709,30 +769,37 @@ export default function TeacherConsole() {
                   {t("broadcastToClass") || "Broadcast to Class"}
                 </h2>
               </div>
-              {isRecording && <MicWaveform isSpeaking={true} className="ml-auto" />}
+              {isMicLive && <MicWaveform isSpeaking={true} className="ml-auto" />}
             </div>
 
             <div className="p-4 sm:p-5 space-y-3.5">
-              <div className="flex gap-2.5">
+              <div className="flex flex-wrap sm:flex-nowrap gap-2.5 items-center">
                 <button
-                  onClick={handleToggleRecord}
-                  disabled={!activeSession || isTranscribing}
-                  title={isRecording ? "Stop & Transcribe" : "Record Voice with Whisper AI"}
-                  className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 transition active:scale-95 ${
-                    isRecording
-                      ? "bg-[var(--red)] text-white animate-pulse shadow-lg ring-4 ring-red-400/30"
-                      : isTranscribing
-                      ? "bg-[var(--amber-tint)] text-[var(--amber)]"
-                      : "bg-[var(--brand-tint)] text-[var(--brand-deep)] hover:bg-[var(--brand-tint2)]"
+                  onClick={handleToggleMic}
+                  disabled={!activeSession || isFlushing}
+                  title={isMicLive ? "Turn Mic OFF" : "Turn Mic ON"}
+                  className={`px-4 py-3 rounded-xl flex items-center gap-2 font-bold text-xs flex-shrink-0 transition active:scale-95 shadow-sm ${
+                    isMicLive
+                      ? "bg-red-600 hover:bg-red-700 text-white animate-pulse shadow-lg ring-4 ring-red-500/30"
+                      : isFlushing
+                      ? "bg-[var(--amber-tint)] text-[var(--amber)] border border-[var(--amber-tint)]"
+                      : "bg-[var(--surface-2)] text-[var(--text-primary)] hover:bg-[var(--brand-tint)] hover:text-[var(--brand-deep)] border border-[var(--border)]"
                   }`}
                 >
-                  {isTranscribing ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                  ) : isRecording ? (
-                    <MicOff className="w-5 h-5" />
+                  {isFlushing ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : isMicLive ? (
+                    <Mic className="w-4 h-4 text-white" />
                   ) : (
-                    <Mic className="w-5 h-5" />
+                    <MicOff className="w-4 h-4 text-[var(--text-muted)]" />
                   )}
+                  <span>
+                    {isFlushing
+                      ? t("finishingTranslation") || "Finishing translation..."
+                      : isMicLive
+                      ? t("micOn") || "Mic ON"
+                      : t("micOff") || "Mic OFF"}
+                  </span>
                 </button>
                 <input
                   type="text"
@@ -742,18 +809,18 @@ export default function TeacherConsole() {
                   placeholder={
                     !activeSession
                       ? "Start or join a class above to begin teaching…"
-                      : isRecording
-                      ? "Recording your voice… Click microphone to stop & broadcast"
-                      : isTranscribing
-                      ? "Transcribing with Whisper AI…"
+                      : isMicLive
+                      ? "Mic is LIVE (continuous speech translation active)"
+                      : isFlushing
+                      ? t("finishingTranslation") || "Finishing translation for students..."
                       : t("broadcastPlaceholder") || "Type or speak lesson text to broadcast to students…"
                   }
-                  disabled={!activeSession || isRecording || isTranscribing}
+                  disabled={!activeSession || isMicLive || isFlushing}
                   className="vs-input flex-1 px-4 py-3 rounded-xl text-sm font-medium disabled:opacity-60"
                 />
                 <button
                   onClick={() => handleBroadcastSpeech()}
-                  disabled={!activeSession || !speechText.trim()}
+                  disabled={!activeSession || !speechText.trim() || isMicLive || isFlushing}
                   className="vs-btn-brand w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 active:scale-95 disabled:opacity-40"
                   title="Broadcast speech"
                 >
@@ -764,9 +831,9 @@ export default function TeacherConsole() {
               {micStatus && (
                 <div
                   className={`text-xs px-3.5 py-2 rounded-xl flex items-center gap-2 font-medium ${
-                    isRecording
-                      ? "bg-[var(--red-tint)] text-[var(--red)] animate-pulse"
-                      : isTranscribing
+                    isMicLive
+                      ? "bg-[var(--red-tint)] text-[var(--red)] animate-pulse font-bold"
+                      : isFlushing
                       ? "bg-[var(--amber-tint)] text-[var(--amber)]"
                       : "bg-[var(--green-tint)] text-[var(--green)]"
                   }`}

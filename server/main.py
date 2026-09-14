@@ -67,6 +67,20 @@ class TranscribeRequest(BaseModel):
     language: Optional[str] = "hi"
     sample_rate: Optional[int] = 16000
 
+class StreamChunkRequest(BaseModel):
+    session_id: str
+    speaker_name: str
+    speaker_role: str
+    source_lang: str
+    audio_base64: str
+    seq_num: int
+    is_final: bool = False
+
+class TeacherMicStateRequest(BaseModel):
+    session_id: str
+    is_live: bool
+    speaker_name: str
+
 class GoogleAuthRequest(BaseModel):
     email: str
     name: str
@@ -436,6 +450,97 @@ async def broadcast_speech(req: BroadcastSpeechRequest):
     await manager.broadcast_to_session(req.session_id, ws_event)
 
     return ws_event
+
+@app.post("/api/speech/mic-state")
+async def update_mic_state(req: TeacherMicStateRequest):
+    event = {
+        "type": "TEACHER_MIC_STATE",
+        "session_id": req.session_id,
+        "is_live": req.is_live,
+        "speaker_name": req.speaker_name,
+        "timestamp": time.time()
+    }
+    await manager.broadcast_to_session(req.session_id, event)
+    return {"status": "SUCCESS", "is_live": req.is_live}
+
+@app.post("/api/speech/stream-chunk")
+async def process_stream_chunk(req: StreamChunkRequest):
+    import base64
+    import numpy as np
+
+    if not req.audio_base64 or not req.audio_base64.strip():
+        if req.is_final:
+            await manager.broadcast_to_session(req.session_id, {
+                "type": "STREAM_FLUSH_COMPLETED",
+                "session_id": req.session_id,
+                "seq_num": req.seq_num
+            })
+        return {"text": "", "is_speech": False, "is_final": req.is_final}
+
+    try:
+        raw_bytes = base64.b64decode(req.audio_base64)
+        audio_array = np.frombuffer(raw_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+        asr_res = transcribe_audio_chunk(audio_array, sample_rate=16000, lang=req.source_lang or "hi")
+        
+        text = asr_res.get("text", "").strip()
+        if text:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT DISTINCT preferred_language FROM participants WHERE session_id = ?", (req.session_id,))
+            rows = cursor.fetchall()
+            target_languages = list(set([row["preferred_language"] for row in rows] + [req.source_lang, "hi", "bn", "mr", "en", "sat", "ta", "te"]))
+
+            tr_res = translate_speech(text, req.source_lang, target_languages)
+            now = time.time()
+
+            cursor.execute('''
+            INSERT INTO transcripts (session_id, speaker_role, speaker_name, original_text, source_lang, translations_json, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (req.session_id, req.speaker_role, req.speaker_name, text, req.source_lang, json.dumps(tr_res["translations"]), now))
+            conn.commit()
+            conn.close()
+
+            ws_event = {
+                "type": "SPEECH_TRANSLATED",
+                "session_id": req.session_id,
+                "speaker_name": req.speaker_name,
+                "speaker_role": req.speaker_role,
+                "original_text": text,
+                "source_lang": req.source_lang,
+                "translations": tr_res["translations"],
+                "ttfa_seconds": tr_res["ttfa_seconds"],
+                "timestamp": now,
+                "seq_num": req.seq_num,
+                "is_final": req.is_final
+            }
+            await manager.broadcast_to_session(req.session_id, ws_event)
+
+            if req.is_final:
+                await manager.broadcast_to_session(req.session_id, {
+                    "type": "STREAM_FLUSH_COMPLETED",
+                    "session_id": req.session_id,
+                    "seq_num": req.seq_num
+                })
+
+            return ws_event
+
+        if req.is_final:
+            await manager.broadcast_to_session(req.session_id, {
+                "type": "STREAM_FLUSH_COMPLETED",
+                "session_id": req.session_id,
+                "seq_num": req.seq_num
+            })
+
+        return {"text": "", "is_speech": False, "is_final": req.is_final}
+
+    except Exception as e:
+        if req.is_final:
+            await manager.broadcast_to_session(req.session_id, {
+                "type": "STREAM_FLUSH_COMPLETED",
+                "session_id": req.session_id,
+                "seq_num": req.seq_num
+            })
+        raise HTTPException(status_code=400, detail=f"Streaming chunk error: {str(e)}")
 
 # Raise Hand & Permissions
 @app.post("/api/sessions/{session_id}/raise-hand")

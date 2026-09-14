@@ -58,13 +58,12 @@ export function LanguageSwitch({ className = "" }: { className?: string }) {
                     setLang(item.code as LanguageCode);
                     setIsOpen(false);
                   }}
-                  className={`w-full px-3 py-2 text-left flex items-center justify-between text-xs transition ${
-                    isDisabled
-                      ? "opacity-50 cursor-not-allowed bg-transparent"
-                      : active
+                  className={`w-full px-3 py-2 text-left flex items-center justify-between text-xs transition ${isDisabled
+                    ? "opacity-50 cursor-not-allowed bg-transparent"
+                    : active
                       ? "bg-[var(--brand-tint)] text-[var(--brand-deep)] font-bold"
                       : "text-[var(--text-primary)] hover:bg-[var(--surface-2)]"
-                  }`}
+                    }`}
                 >
                   <div className="flex flex-col">
                     <span className="font-bold text-xs">{item.nativeName}</span>

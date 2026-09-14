@@ -64,3 +64,12 @@ export const NIPUN_CURRICULUM: NipunOutcome[] = [
     outcome: 'Identify 2D/3D shapes and calculate repeated addition groups.'
   }
 ];
+
+export function getLocalizedSubjectKey(courseName: string): string {
+  if (!courseName) return "subjectMath";
+  const c = courseName.toLowerCase();
+  if (c.includes("math") || c.includes("गणित")) return "subjectMath";
+  if (c.includes("literacy") || c.includes("language") || c.includes("bhasha") || c.includes("भाषा")) return "subjectLiteracy";
+  if (c.includes("science") || c.includes("evs") || c.includes("paryavaran") || c.includes("पर्यावरण")) return "subjectScience";
+  return "subjectGK";
+}

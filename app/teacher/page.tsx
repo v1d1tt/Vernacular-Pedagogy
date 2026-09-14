@@ -17,12 +17,14 @@ import {
   reactivateSession,
   streamAudioChunk,
   updateTeacherMicState,
+  fetchRaisedHands,
   SessionData,
   WSHandle,
 } from "@/lib/api-client";
 import { ContinuousAudioStreamer } from "@/lib/audio-streamer";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LanguageSwitch } from "@/components/language-switch";
+import { getLocalizedSubjectKey } from "@/lib/nipun-data";
 import { useLanguage } from "@/components/language-provider";
 import {
   Mic,
@@ -61,10 +63,13 @@ export interface SessionInfo {
 }
 
 export interface SpeechTranscript {
+  id?: string;
   speaker_name: string;
   speaker_role: string;
   original_text: string;
+  source_lang?: string;
   ttfa_seconds: number;
+  timestamp?: number;
   translations?: Record<string, string>;
 }
 
@@ -146,7 +151,17 @@ export default function TeacherConsole() {
             prev.find((p) => p.participant_id === item.participant_id) ? prev : [...prev, item]
           );
         } else if (msg.type === "SPEECH_TRANSLATED") {
-          setTranscripts((prev) => [msg as unknown as SpeechTranscript, ...prev]);
+          const newT = msg as unknown as SpeechTranscript;
+          setTranscripts((prev) => {
+            const isDup = prev.some(
+              (item) =>
+                (item.id && newT.id && item.id === newT.id) ||
+                (item.original_text === newT.original_text &&
+                  Math.abs((item.timestamp || 0) - (newT.timestamp || 0)) < 3)
+            );
+            if (isDup) return prev;
+            return [newT, ...prev];
+          });
         } else if (msg.type === "ACTIVITY_PUBLISHED_TO_CLASS") {
           // Activity confirmed
         } else if (msg.type === "SESSION_ENDED") {
@@ -212,6 +227,22 @@ export default function TeacherConsole() {
           if (parsed && parsed.session_id && !String(parsed.session_id).startsWith("LOCAL-")) {
             setActiveSession(parsed);
             initSessionWebSocket(parsed.session_id);
+            void (async () => {
+              try {
+                const rh = await fetchRaisedHands(parsed.session_id);
+                if (rh?.raised_hands && Array.isArray(rh.raised_hands)) {
+                  setRaiseHandQueue(
+                    rh.raised_hands.map(
+                      (item: { id?: string; participant_id?: string; student_name?: string; preferred_language?: string }) => ({
+                        participant_id: item.id || item.participant_id || "",
+                        student_name: item.student_name || "Student",
+                        preferred_language: item.preferred_language || "hi",
+                      })
+                    )
+                  );
+                }
+              } catch {}
+            })();
           } else {
             localStorage.removeItem("teacher_active_session");
           }
@@ -248,7 +279,7 @@ export default function TeacherConsole() {
       const sessionInfo: SessionInfo = {
         session_id: sd.session_id,
         teacher_name: sd.teacher_name,
-        course_name: sd.course_name,
+        course_name: sd.course_name || courseName,
         grade: sd.grade,
         teaching_language: sd.teaching_language,
         mode: sd.mode || "LECTURE",
@@ -256,7 +287,9 @@ export default function TeacherConsole() {
         is_active: 1,
       };
       setActiveSession(sessionInfo);
+      setCourseName(sessionInfo.course_name);
       try {
+        localStorage.setItem("user_subject", sessionInfo.course_name);
         localStorage.setItem("teacher_active_session", JSON.stringify(sessionInfo));
       } catch {}
       initSessionWebSocket(sessionInfo.session_id);
@@ -367,7 +400,17 @@ export default function TeacherConsole() {
         original_text: text,
         source_lang: teachingLang,
       });
-      setTranscripts((prev) => [res as unknown as SpeechTranscript, ...prev]);
+      const newT = res as unknown as SpeechTranscript;
+      setTranscripts((prev) => {
+        const isDup = prev.some(
+          (item) =>
+            (item.id && newT.id && item.id === newT.id) ||
+            (item.original_text === newT.original_text &&
+              Math.abs((item.timestamp || 0) - (newT.timestamp || 0)) < 3)
+        );
+        if (isDup) return prev;
+        return [newT, ...prev];
+      });
       setSpeechText("");
     } catch (e) {
       console.error("Broadcast failed:", e);
@@ -495,6 +538,7 @@ export default function TeacherConsole() {
         grade,
         activity_type: type,
         language: teachingLang,
+        course_name: activeSession.course_name || courseName,
       });
       setPendingActivities((prev) => [res as ActivityItem, ...prev]);
     } catch (e) {
@@ -524,15 +568,9 @@ export default function TeacherConsole() {
     DISCUSSION: "bg-[var(--green-tint)] text-[var(--green)] font-bold",
   };
 
-  const modeLabels: Record<string, string> = {
-    LECTURE: t("modeLecture") || "LECTURE",
-    Q_AND_A: t("modeQA") || "Q & A",
-    DISCUSSION: t("modeDiscussion") || "DISCUSSION",
-  };
-
   const quickSamples = [
     t("quickSample1") || "Today we will learn addition in mathematics.",
-    t("quickSample2") || "How many apples are there on the tree?",
+    t("quickSample2") || "How many apples are there?",
     t("quickSample3") || "What is three plus two?",
   ];
 
@@ -586,23 +624,35 @@ export default function TeacherConsole() {
             {!activeSession ? (
               <select
                 value={courseName}
-                onChange={(e) => setCourseName(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setCourseName(val);
+                  try {
+                    localStorage.setItem("user_subject", val);
+                  } catch {}
+                }}
                 className="vs-input px-2 py-1 rounded-lg text-xs font-bold border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-primary)] cursor-pointer outline-none max-w-[140px] sm:max-w-[210px] truncate"
               >
-                <option value="Mathematics">📐 Mathematics</option>
-                <option value="Literacy & Language">📚 Literacy & Language</option>
-                <option value="EVS & Science">🌿 EVS & Science</option>
-                <option value="General Knowledge">💡 General Knowledge</option>
+                <option value="Mathematics">{t("subjectMath")}</option>
+                <option value="Literacy & Language">{t("subjectLiteracy")}</option>
+                <option value="EVS & Science">{t("subjectScience")}</option>
+                <option value="General Knowledge">{t("subjectGK")}</option>
               </select>
             ) : (
-              <span className="font-bold text-xs text-[var(--brand-deep)] truncate">{courseName}</span>
+              <span className="font-bold text-xs text-[var(--brand-deep)] truncate">
+                {t(getLocalizedSubjectKey(activeSession.course_name || courseName), activeSession.course_name || courseName)}
+              </span>
             )}
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
             {/* Class Mode Switcher (on md+ screens) */}
             <div className="hidden md:flex items-center bg-[var(--surface-2)] rounded-xl p-0.5 gap-1 border border-[var(--border)]">
-              {(["LECTURE", "Q_AND_A", "DISCUSSION"] as const).map((m) => (
+              {[
+                { code: "LECTURE" as const, label: t("modeLecture") },
+                { code: "Q_AND_A" as const, label: t("modeQA") },
+                { code: "DISCUSSION" as const, label: t("modeDiscussion") }
+              ].map(({ code: m, label }) => (
                 <button
                   key={m}
                   onClick={() => setMode(m)}
@@ -610,7 +660,7 @@ export default function TeacherConsole() {
                     mode === m ? modeStyles[m] : "text-[var(--text-muted)] hover:text-[var(--text-primary)] font-medium"
                   }`}
                 >
-                  {modeLabels[m]}
+                  {label}
                 </button>
               ))}
             </div>
@@ -917,18 +967,28 @@ export default function TeacherConsole() {
                         &ldquo;{tItem.original_text}&rdquo;
                       </p>
                       {Object.keys(tItem.translations || {}).length > 0 && (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-1.5 pt-1">
-                          {Object.entries(tItem.translations || {}).map(([trLang, text]) => (
-                            <div
-                              key={trLang}
-                              className="p-2 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[11px]"
-                            >
-                              <span className="font-bold text-[var(--brand-deep)] uppercase text-[10px]">
-                                {trLang}{" "}
-                              </span>
-                              <span className="text-[var(--text-secondary)]">{text}</span>
-                            </div>
-                          ))}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                          {Object.entries(tItem.translations || {})
+                            .filter(([trLang]) => ["hi", "sat", "en"].includes(trLang) && trLang !== (tItem.source_lang || teachingLang))
+                            .map(([trLang, text]) => {
+                              const pillMap: Record<string, string> = {
+                                hi: t("langPillHi"),
+                                sat: t("langPillSat"),
+                                en: t("langPillEn")
+                              };
+                              const label = pillMap[trLang] || trLang.toUpperCase();
+                              return (
+                                <div
+                                  key={trLang}
+                                  className="p-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs flex items-baseline gap-2 shadow-2xs"
+                                >
+                                  <span className="font-bold text-[var(--brand-deep)] text-[11px] shrink-0 px-2 py-0.5 rounded-md bg-[var(--brand-tint)] border border-[var(--brand-tint2)]">
+                                    {label}
+                                  </span>
+                                  <span className="text-[var(--text-primary)] font-medium leading-normal">{text}</span>
+                                </div>
+                              );
+                            })}
                         </div>
                       )}
                     </div>
@@ -1294,7 +1354,7 @@ export default function TeacherConsole() {
                           </span>
                           <span className="text-sm font-extrabold text-[var(--text-primary)]">{c.course_name}</span>
                           <span className="text-xs text-[var(--text-muted)] font-medium">
-                            · Class {c.grade} ({c.teaching_language.toUpperCase()})
+                            · {t("class")} {c.grade} ({c.teaching_language.toUpperCase()})
                           </span>
                         </div>
 

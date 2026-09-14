@@ -267,6 +267,7 @@ export interface JoinResult {
   student_name: string;
   preferred_language: string;
   course_name: string;
+  grade: number;
   teaching_language: string;
 }
 
@@ -348,6 +349,7 @@ export async function generateAiContent(data: {
   grade: number;
   activity_type: string;
   language?: string;
+  course_name?: string;
 }) {
   const base = await ensureServer();
   const res = await fetch(`${base}/api/content/generate`, {
@@ -530,11 +532,25 @@ export async function transcribeAudio(
   }
 }
 
-export async function fetchPublishedActivities(sessionId: string) {
+export async function fetchPublishedActivities(sessionId: string, lang?: string) {
   const base = await ensureServer();
-  const res = await fetch(`${base}/api/sessions/${sessionId}/activities?status=APPROVED`);
+  const url = lang
+    ? `${base}/api/sessions/${sessionId}/activities?status=APPROVED&lang=${encodeURIComponent(lang)}`
+    : `${base}/api/sessions/${sessionId}/activities?status=APPROVED`;
+  const res = await fetch(url);
   if (!res.ok) throw new Error("Failed to fetch activities");
   return await res.json();
+}
+
+export async function fetchRaisedHands(sessionId: string) {
+  try {
+    const base = await ensureServer();
+    const res = await fetch(`${base}/api/sessions/${sessionId}/raised-hands`);
+    if (!res.ok) return { raised_hands: [] };
+    return await res.json();
+  } catch {
+    return { raised_hands: [] };
+  }
 }
 
 export async function fetchAiStatus() {

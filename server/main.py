@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from database import get_db_connection, init_db
-from ai_engine import translate_speech, generate_nipun_content, transcribe_audio_chunk, LANGUAGES, NIPUN_KNOWLEDGE_BASE
+from ai_engine import translate_speech, generate_nipun_content, transcribe_audio_chunk, translate_activity_content, LANGUAGES, NIPUN_KNOWLEDGE_BASE
 from model_manager import edge_ai
 from session_manager import manager
 
@@ -51,6 +51,7 @@ class GenerateContentRequest(BaseModel):
     grade: int
     activity_type: str  # QUIZ, FLASHCARD, WORKSHEET
     language: Optional[str] = "hi"
+    course_name: Optional[str] = "Mathematics"
 
 class ApproveContentRequest(BaseModel):
     activity_id: str
@@ -411,23 +412,25 @@ def join_session(session_id: str, req: JoinSessionRequest):
         "student_name": req.student_name,
         "preferred_language": req.preferred_language,
         "course_name": session["course_name"],
+        "grade": session["grade"],
         "teaching_language": session["teaching_language"]
     }
 
 # Speech Translation Broadcast
 @app.post("/api/speech/broadcast")
 async def broadcast_speech(req: BroadcastSpeechRequest):
-    # Collect all unique languages in the session
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT preferred_language FROM participants WHERE session_id = ?", (req.session_id,))
-    rows = cursor.fetchall()
-    target_languages = list(set([row["preferred_language"] for row in rows] + [req.source_lang, "hi", "bn", "mr", "en", "sat"]))
+    # Main 3 working languages: Hindi (hi), Santali (sat), English (en)
+    # Target only the remaining languages (excluding original source language)
+    target_languages = [l for l in ["hi", "sat", "en"] if l != req.source_lang]
+    if not target_languages:
+        target_languages = ["hi", "sat", "en"]
 
     # Perform Fan-Out Translation
     translation_result = translate_speech(req.original_text, req.source_lang, target_languages)
     
     now = time.time()
+    conn = get_db_connection()
+    cursor = conn.cursor()
     cursor.execute('''
     INSERT INTO transcripts (session_id, speaker_role, speaker_name, original_text, source_lang, translations_json, timestamp)
     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -484,15 +487,14 @@ async def process_stream_chunk(req: StreamChunkRequest):
         
         text = asr_res.get("text", "").strip()
         if text:
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT DISTINCT preferred_language FROM participants WHERE session_id = ?", (req.session_id,))
-            rows = cursor.fetchall()
-            target_languages = list(set([row["preferred_language"] for row in rows] + [req.source_lang, "hi", "bn", "mr", "en", "sat", "ta", "te"]))
+            target_languages = [l for l in ["hi", "sat", "en"] if l != req.source_lang]
+            if not target_languages:
+                target_languages = ["hi", "sat", "en"]
 
             tr_res = translate_speech(text, req.source_lang, target_languages)
             now = time.time()
-
+            conn = get_db_connection()
+            cursor = conn.cursor()
             cursor.execute('''
             INSERT INTO transcripts (session_id, speaker_role, speaker_name, original_text, source_lang, translations_json, timestamp)
             VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -600,10 +602,11 @@ async def generate_content(req: GenerateContentRequest):
     rows = cursor.fetchall()
 
     target_lang = req.language
-    cursor.execute("SELECT teaching_language FROM sessions WHERE id = ?", (req.session_id,))
+    cursor.execute("SELECT teaching_language, course_name FROM sessions WHERE id = ?", (req.session_id,))
     s_row = cursor.fetchone()
     if not target_lang and s_row and s_row["teaching_language"]:
         target_lang = s_row["teaching_language"]
+    subject_val = req.course_name or (s_row["course_name"] if s_row and s_row["course_name"] else "Mathematics")
     conn.close()
 
     # Build a combined lesson transcript from actual speech
@@ -623,7 +626,7 @@ async def generate_content(req: GenerateContentRequest):
     fallback_summary = FALLBACK_LESSON_SUMMARIES.get(target_lang or "en", "Today's Primary Lesson")
     full_transcript = " ".join(lesson_texts) if lesson_texts else req.transcript_summary or fallback_summary
 
-    activity_data = generate_nipun_content(full_transcript, req.grade, req.activity_type, lang=target_lang or "en")
+    activity_data = generate_nipun_content(full_transcript, req.grade, req.activity_type, lang=target_lang or "en", subject=subject_val)
     activity_id = str(uuid.uuid4())[:8]
     now = time.time()
 
@@ -689,8 +692,17 @@ async def approve_content(req: ApproveContentRequest):
         return {"status": "SUCCESS", "activity_status": req.status}
     raise HTTPException(status_code=404, detail="Activity not found")
 
+@app.get("/api/sessions/{session_id}/raised-hands")
+def get_raised_hands(session_id: str):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, student_id, student_name, preferred_language FROM participants WHERE session_id = ? AND raised_hand = 1 ORDER BY joined_at ASC", (session_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return {"raised_hands": [dict(r) for r in rows]}
+
 @app.get("/api/sessions/{session_id}/activities")
-def get_session_activities(session_id: str, status: Optional[str] = None):
+def get_session_activities(session_id: str, status: Optional[str] = None, lang: Optional[str] = None):
     conn = get_db_connection()
     cursor = conn.cursor()
     if status:
@@ -703,7 +715,11 @@ def get_session_activities(session_id: str, status: Optional[str] = None):
     activities = []
     for row in rows:
         item = dict(row)
-        item["content"] = json.loads(item["content_json"])
+        raw_content = json.loads(item["content_json"])
+        if lang:
+            item["content"] = translate_activity_content(raw_content, lang)
+        else:
+            item["content"] = raw_content
         activities.append(item)
     return {"activities": activities}
 

@@ -16,6 +16,7 @@ import {
   getSessionByCode,
   WSHandle,
 } from "@/lib/api-client";
+import { getLocalizedSubjectKey } from "@/lib/nipun-data";
 import { AudioRecorder } from "@/lib/audio-recorder";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LanguageSwitch } from "@/components/language-switch";
@@ -28,14 +29,12 @@ import {
   ArrowLeft,
   CheckCircle2,
   Mic,
-  MicOff,
   Award,
   Globe,
   Square,
   Sparkles,
   Key,
   X,
-  Loader2,
 } from "lucide-react";
 import { MicWaveform } from "@/components/mic-waveform";
 import { prepareTtsText } from "@/lib/ol-chiki";
@@ -160,6 +159,8 @@ export default function StudentConsole() {
   const [serverParticipantId, setServerParticipantId] = useState<string | null>(null);
   const [joinedSession, setJoinedSession] = useState<{ session_id: string } | null>(null);
   const [activeClassCode, setActiveClassCode] = useState<string>("");
+  const [classSubject, setClassSubject] = useState<string>("");
+  const [classGrade, setClassGrade] = useState<number | null>(null);
   const [serverUrl, setServerUrlState] = useState("");
   const [serverOnline, setServerOnline] = useState<boolean | null>(null);
   const [serverDetecting, setServerDetecting] = useState(false);
@@ -202,11 +203,9 @@ export default function StudentConsole() {
   const [ttfa, setTtfa] = useState<number | null>(null);
   const [raisedHand, setRaisedHand] = useState(false);
   const [canSpeak, setCanSpeak] = useState(false);
+  const [handRejected, setHandRejected] = useState(false);
   const [isRecordingStudent, setIsRecordingStudent] = useState(false);
   const [studentMicStatus, setStudentMicStatus] = useState<string | null>(null);
-  const [isDirectQuestionMic, setIsDirectQuestionMic] = useState(false);
-  const [, setDirectQuestionText] = useState("");
-  const [isTranscribingQuestion, setIsTranscribingQuestion] = useState(false);
 
   // Voice answering state for quizzes
   const [voiceListeningForQId, setVoiceListeningForQId] = useState<string | null>(null);
@@ -433,9 +432,15 @@ export default function StudentConsole() {
           } else if (msg.type === "SPEAKING_PERMISSION" || msg.type === "SPEAKING_PERMISSION_CHANGED") {
             // Server echoes the participant_id WE joined with (uuid), not the local P-xxx.
             if (msg.participant_id === myServerPid) {
-              setCanSpeak(Boolean(msg.can_speak ?? msg.allowed));
-              if (msg.can_speak || msg.allowed) {
+              const isAllowed = Boolean(msg.can_speak ?? msg.allowed);
+              setCanSpeak(isAllowed);
+              if (isAllowed) {
                 setRaisedHand(false);
+                setHandRejected(false);
+              } else {
+                setHandRejected(true);
+                setRaisedHand(false);
+                setTimeout(() => setHandRejected(false), 5000);
               }
             }
           } else if (msg.type === "TEACHER_MIC_STATE") {
@@ -481,6 +486,8 @@ export default function StudentConsole() {
             if (sess && sess.id) {
               targetSessionId = sess.id;
               setActiveClassCode(sess.join_code || savedCode.trim().toUpperCase());
+              if (sess.course_name) setClassSubject(sess.course_name);
+              if (sess.grade) setClassGrade(Number(sess.grade));
             }
           } catch (e) {
             console.warn("Class code lookup failed:", e);
@@ -501,6 +508,8 @@ export default function StudentConsole() {
               if (activeList[0].join_code) {
                 setActiveClassCode(activeList[0].join_code);
               }
+              if (activeList[0].course_name) setClassSubject(activeList[0].course_name);
+              if (activeList[0].grade) setClassGrade(Number(activeList[0].grade));
             }
           } catch (e) {
             console.warn("fetchActiveSessions failed:", e);
@@ -518,6 +527,9 @@ export default function StudentConsole() {
           });
           const srvPid: string = joinRes.participant_id;
           setServerParticipantId(srvPid);
+          // Capture class metadata from join response
+          if (joinRes.course_name) setClassSubject(joinRes.course_name);
+          if (joinRes.grade) setClassGrade(Number(joinRes.grade));
           try {
             localStorage.setItem("user_server_participant_id", srvPid);
           } catch {}
@@ -525,7 +537,7 @@ export default function StudentConsole() {
           localStorage.setItem("user_joined_session_id", targetSessionId);
 
           try {
-            const res = await fetchPublishedActivities(targetSessionId);
+            const res = await fetchPublishedActivities(targetSessionId, studentLang);
             if (res && res.activities && res.activities.length > 0) {
               setActivities(res.activities as StudentActivity[]);
             }
@@ -556,6 +568,18 @@ export default function StudentConsole() {
     },
     [participantId, studentName, studentLang, runServerDetect, attachSessionWebSocket]
   );
+
+  useEffect(() => {
+    if (joinedSession?.session_id) {
+      fetchPublishedActivities(joinedSession.session_id, studentLang)
+        .then((res) => {
+          if (res?.activities) {
+            setActivities(res.activities as StudentActivity[]);
+          }
+        })
+        .catch((e) => console.warn("Failed to refetch activities for lang:", e));
+    }
+  }, [joinedSession, studentLang]);
 
   useEffect(() => {
     const s = localStorage.getItem("user_name");
@@ -594,49 +618,6 @@ export default function StudentConsole() {
       }
     } catch {
       setCodeError(t("sessionNotFoundError") || "Invalid class code or class is not active. Check server connection too.");
-    }
-  };
-
-  // Student Direct Mic Question
-  const handleToggleDirectMic = async () => {
-    if (!joinedSession || !recorder || String(joinedSession.session_id).startsWith("LOCAL-")) {
-      setStudentMicStatus("Not connected to a live class — fix server connection first.");
-      setTimeout(() => setStudentMicStatus(null), 3000);
-      return;
-    }
-    if (isDirectQuestionMic) {
-      setIsDirectQuestionMic(false);
-      setIsTranscribingQuestion(true);
-      try {
-        const b64Pcm = await recorder.stop();
-        if (b64Pcm) {
-          const res = await transcribeAudio(b64Pcm, studentLang);
-          const questionText = res?.text || "Ma'am, please explain again.";
-          setDirectQuestionText(questionText);
-          await broadcastSpeech({
-            session_id: joinedSession.session_id,
-            speaker_name: studentName,
-            speaker_role: "STUDENT",
-            original_text: questionText,
-            source_lang: studentLang,
-          });
-          setStudentMicStatus(`Question sent: "${questionText}"`);
-        }
-      } catch (err) {
-        console.error("Direct mic error:", err);
-      } finally {
-        setIsTranscribingQuestion(false);
-        setTimeout(() => setStudentMicStatus(null), 4000);
-      }
-    } else {
-      try {
-        await recorder.start();
-        setIsDirectQuestionMic(true);
-        setStudentMicStatus("Listening... Speak your question, then tap stop");
-      } catch (err) {
-        console.error("Mic access error:", err);
-        setStudentMicStatus("Could not access microphone");
-      }
     }
   };
 
@@ -834,11 +815,11 @@ export default function StudentConsole() {
   };
 
   const tabs = [
-    { id: "LISTEN" as const, label: t("tabListen") || "Listen", icon: <Volume2 className="w-4 h-4" /> },
-    { id: "QUIZ" as const, label: t("tabQuiz") || "Quiz", icon: <HelpCircle className="w-4 h-4" /> },
-    { id: "WORKSHEET" as const, label: t("tabWorksheet") || "Worksheet", icon: <BookOpen className="w-4 h-4" /> },
-    { id: "FLASHCARDS" as const, label: t("tabCards") || "Cards", icon: <Award className="w-4 h-4" /> },
-    { id: "GAMES" as const, label: "Games 🎮", icon: <Sparkles className="w-4 h-4" /> },
+    { id: "LISTEN" as const, label: t("tabListen"), icon: <Volume2 className="w-4 h-4" /> },
+    { id: "QUIZ" as const, label: t("quizTab"), icon: <HelpCircle className="w-4 h-4" /> },
+    { id: "WORKSHEET" as const, label: t("worksheetsTab"), icon: <BookOpen className="w-4 h-4" /> },
+    { id: "FLASHCARDS" as const, label: t("flashcardsTab"), icon: <Award className="w-4 h-4" /> },
+    { id: "GAMES" as const, label: t("gamesTab"), icon: <Sparkles className="w-4 h-4" /> },
   ];
 
   return (
@@ -860,7 +841,11 @@ export default function StudentConsole() {
             <div>
               <p className="text-sm font-extrabold text-[var(--text-primary)] leading-none">{studentName}</p>
               <p className="text-[10px] text-[var(--text-muted)] mt-0.5 font-medium">
-                Class {grade} · <span className="text-[var(--brand-deep)] font-bold">{studentLangName}</span>
+                {t("class")} {classGrade || grade}
+                {classSubject ? (
+                  <> · <span className="text-[var(--brand-deep)] font-bold">{t(getLocalizedSubjectKey(classSubject), classSubject)}</span></>
+                ) : null}
+                 · <span className="text-[var(--brand-deep)] font-bold">{studentLangName}</span>
               </p>
             </div>
           </div>
@@ -1019,7 +1004,7 @@ export default function StudentConsole() {
               </button>
             </div>
 
-            {/* Speaking Options Card (Raise Hand + Direct Voice Question) */}
+            {/* Speaking Options Card (Hand Raise Required) */}
             <div className="vs-surface rounded-2xl p-5 border border-[var(--border)] shadow-xs space-y-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -1027,7 +1012,7 @@ export default function StudentConsole() {
                     {t("wantToSpeak") || "Ask or Speak to Teacher"}
                   </h3>
                   <p className="text-xs text-[var(--text-muted)] mt-0.5">
-                    Speak using your microphone or raise your hand
+                    {t("speakOrRaiseHand")}
                   </p>
                 </div>
                 {raisedHand && !canSpeak && (
@@ -1037,58 +1022,37 @@ export default function StudentConsole() {
                 )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {/* Raise Hand Button */}
-                <button
-                  onClick={handleToggleRaiseHand}
-                  className={`py-3.5 px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 ${
-                    isRecordingStudent
-                      ? "bg-[var(--red)] text-white animate-pulse shadow-md"
-                      : canSpeak
-                      ? "bg-[var(--green)] text-white shadow-md animate-bounce"
-                      : raisedHand
-                      ? "bg-[var(--amber-tint)] text-[var(--amber)] border border-[var(--amber)]"
-                      : "bg-[var(--surface-2)] text-[var(--text-primary)] border border-[var(--border)] hover:border-[var(--brand)]"
-                  }`}
-                >
-                  <Hand className="w-4 h-4" />
-                  <span>
-                    {isRecordingStudent
-                      ? "Recording… Tap to send"
-                      : canSpeak
-                      ? "Teacher Approved! Tap to speak"
-                      : raisedHand
-                      ? t("handRaisedWaitingBtn") || "Hand Raised"
-                      : t("raiseMyHandBtn") || "Raise Hand"}
-                  </span>
-                </button>
+              {handRejected && (
+                <div className="text-xs p-3 rounded-xl bg-[var(--red-tint)] border border-[var(--red)] text-[var(--red)] font-bold animate-fadeIn flex items-center justify-between">
+                  <span>⚠️ {t("handDenied")}</span>
+                  <button onClick={() => setHandRejected(false)} className="p-1 text-xs">✕</button>
+                </div>
+              )}
 
-                {/* Direct Mic Question Button */}
-                <button
-                  onClick={handleToggleDirectMic}
-                  disabled={isTranscribingQuestion}
-                  className={`py-3.5 px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 ${
-                    isDirectQuestionMic
-                      ? "bg-[var(--red)] text-white animate-pulse shadow-md ring-4 ring-red-400/20"
-                      : "vs-btn-brand shadow-xs"
-                  }`}
-                >
-                  {isTranscribingQuestion ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : isDirectQuestionMic ? (
-                    <MicOff className="w-4 h-4" />
-                  ) : (
-                    <Mic className="w-4 h-4" />
-                  )}
-                  <span>
-                    {isTranscribingQuestion
-                      ? "Transcribing with Whisper…"
-                      : isDirectQuestionMic
-                      ? "Recording… Tap to Send"
-                      : t("studentSpeakOption") || "Ask with Mic 🎙️"}
-                  </span>
-                </button>
-              </div>
+              {/* Raise Hand Button (Only mic access path for students) */}
+              <button
+                onClick={handleToggleRaiseHand}
+                className={`w-full py-4 px-4 rounded-xl font-extrabold text-sm flex items-center justify-center gap-2 transition active:scale-95 shadow-sm ${
+                  isRecordingStudent
+                    ? "bg-[var(--red)] text-white animate-pulse shadow-md"
+                    : canSpeak
+                    ? "bg-[var(--green)] text-white shadow-md animate-bounce"
+                    : raisedHand
+                    ? "bg-[var(--amber-tint)] text-[var(--amber)] border-2 border-[var(--amber)]"
+                    : "vs-btn-brand"
+                }`}
+              >
+                <Hand className="w-5 h-5" />
+                <span>
+                  {isRecordingStudent
+                    ? "Recording… Tap to send"
+                    : canSpeak
+                    ? "Teacher Approved! Tap to speak"
+                    : raisedHand
+                    ? t("handRaisedWaitingBtn") || "Hand Raised"
+                    : t("raiseMyHandBtn") || "Raise Hand"}
+                </span>
+              </button>
 
               {studentMicStatus && (
                 <div className="text-xs px-3.5 py-2 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text-primary)] font-medium flex items-center gap-2">
@@ -1379,7 +1343,7 @@ export default function StudentConsole() {
                                 className="flex-1 py-2 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--brand)] text-[var(--text-primary)] font-bold text-[11px] flex items-center justify-center gap-1 transition"
                               >
                                 <Volume2 className="w-3 h-3" />
-                                <span>Listen</span>
+                                <span>{t("pronounce")}</span>
                               </button>
                               <button
                                 type="button"
@@ -1387,7 +1351,7 @@ export default function StudentConsole() {
                                 className="flex-1 py-2 rounded-xl bg-[var(--brand-tint)] text-[var(--brand-deep)] border border-[var(--brand-tint2)] font-bold text-[11px] flex items-center justify-center gap-1 transition"
                               >
                                 <Mic className="w-3 h-3" />
-                                <span>Practice</span>
+                                <span>{t("practice")}</span>
                               </button>
                             </div>
 
@@ -1421,7 +1385,9 @@ export default function StudentConsole() {
                         </div>
                         <div>
                           <p className="text-xl font-black text-[var(--text-primary)]">{card.word}</p>
-                          <p className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">{card.eng}</p>
+                          {studentLang === "en" && (
+                            <p className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">{card.eng}</p>
+                          )}
                           <p className="text-[11px] text-[var(--text-secondary)]">{card.desc}</p>
                         </div>
                       </div>
@@ -1433,7 +1399,7 @@ export default function StudentConsole() {
                           className="flex-1 py-2 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--brand)] text-[var(--text-primary)] font-bold text-xs flex items-center justify-center gap-1 transition"
                         >
                           <Volume2 className="w-3.5 h-3.5" />
-                          <span>Pronounce</span>
+                          <span>{t("pronounce")}</span>
                         </button>
                         <button
                           type="button"
@@ -1441,7 +1407,7 @@ export default function StudentConsole() {
                           className="flex-1 py-2 rounded-xl bg-[var(--brand-tint)] text-[var(--brand-deep)] border border-[var(--brand-tint2)] font-bold text-xs flex items-center justify-center gap-1 transition"
                         >
                           <Mic className="w-3.5 h-3.5" />
-                          <span>Practice</span>
+                          <span>{t("practice")}</span>
                         </button>
                       </div>
 
@@ -1465,36 +1431,50 @@ export default function StudentConsole() {
               <div>
                 <div className="flex items-center gap-2">
                   <Award className="w-5 h-5 text-[var(--brand-deep)]" />
-                  <h3 className="text-sm font-extrabold text-[var(--brand-deep)]">NIPUN FLN Audio Games</h3>
+                  <h3 className="text-sm font-extrabold text-[var(--brand-deep)]">
+                    {t("nipunGamesTitle")}
+                  </h3>
                 </div>
                 <p className="text-xs text-[var(--text-secondary)] mt-0.5">
-                  Interactive audio games for Class {grade} · Language: <span className="font-bold">{studentLangName}</span>
+                  {t("interactiveGamesDesc")} {grade} · <span className="font-bold">{studentLangName}</span>
                 </p>
               </div>
               <div className="px-3.5 py-1.5 rounded-xl bg-[var(--surface)] border border-[var(--brand-tint2)] text-xs font-black text-[var(--brand-deep)] shadow-2xs">
-                ⭐ {gameScore} Stars
+                ⭐ {gameScore} {t("stars")}
               </div>
             </div>
 
             <div className="vs-surface rounded-2xl p-6 text-center space-y-5 border border-[var(--border)] shadow-xs">
               <div className="flex items-center justify-between text-xs text-[var(--text-muted)] font-bold uppercase tracking-wider">
-                <span>Game {activeGameIndex + 1} of 3</span>
-                <span>NIPUN Foundational</span>
+                <span>{t("game")} {activeGameIndex + 1} {t("of")} 3</span>
+                <span>{t("nipunFoundational")}</span>
               </div>
 
               {activeGameIndex === 0 && (
                 <div className="space-y-4">
                   <h4 className="text-lg font-black text-[var(--text-primary)]">
-                    {studentLang === "sat" ? "ᱮᱞᱠᱷᱟ: ᱛᱤᱱᱟᱹᱜ ᱥᱮᱣ ᱢᱮᱱᱟᱜᱼᱟ? (Count Apples)" : "गिनती: कितने सेब हैं? (Count Apples)"}
+                    {studentLang === "sat"
+                      ? "ᱮᱞᱠᱷᱟ: ᱛᱤᱱᱟᱹᱜ ᱥᱮᱣ ᱢᱮᱱᱟᱜᱼᱟ?"
+                      : studentLang === "hi"
+                      ? "गिनती: कितने सेब हैं?"
+                      : studentLang === "bn"
+                      ? "গণনা: কয়টি আপেল আছে?"
+                      : studentLang === "mr"
+                      ? "मोजणी: किती सफरचंद आहेत?"
+                      : studentLang === "ta"
+                      ? "எண்ணிக்கை: எத்தனை ஆப்பிள்கள் உள்ளன?"
+                      : studentLang === "te"
+                      ? "లెక్కించడం: ఎన్ని యాపిల్స్ ఉన్నాయి?"
+                      : "Counting: How many apples?"}
                   </h4>
                   <div className="flex items-center justify-center gap-4 text-5xl py-6 bg-[var(--surface-2)] rounded-2xl border border-[var(--border)]">
                     🍎 🍎 🍎 🍎
                   </div>
                   <button
-                    onClick={() => playSyntheticAudio(studentLang === "sat" ? "ᱯᱩᱱᱭᱟᱹ ᱥᱮᱣ" : "चार सेब हैं", studentLang)}
+                    onClick={() => playSyntheticAudio(studentLang === "sat" ? "ᱯᱩᱱᱭᱟᱹ ᱥᱮᱣ" : studentLang === "hi" ? "चार सेब हैं" : "Four apples", studentLang)}
                     className="mx-auto px-4 py-2 rounded-xl bg-[var(--brand-tint)] text-[var(--brand-deep)] font-bold text-xs flex items-center gap-2 hover:bg-[var(--brand-tint2)] transition"
                   >
-                    <Volume2 className="w-4 h-4" /> Listen Audio
+                    <Volume2 className="w-4 h-4" /> {t("listenAudio")}
                   </button>
                   <div className="grid grid-cols-4 gap-2 pt-2">
                     {["2", "3", "4", "5"].map((num) => (
@@ -1503,7 +1483,7 @@ export default function StudentConsole() {
                         onClick={() => {
                           if (num === "4") {
                             setGameScore((s) => s + 10);
-                            playSyntheticAudio(studentLang === "sat" ? "ᱥᱟᱹᱨᱤ ᱜᱮ! ᱯᱩᱱᱭᱟᱹ" : "सही जवाब! चार", studentLang);
+                            playSyntheticAudio(studentLang === "sat" ? "ᱥᱟᱹᱨᱤ ᱜᱮ! ᱯᱩᱱᱭᱟᱹ" : studentLang === "hi" ? "सही जवाब! चार" : "Correct! Four", studentLang);
                           }
                         }}
                         className="py-4 rounded-xl bg-[var(--surface-2)] border-2 border-[var(--border)] hover:border-[var(--brand)] text-xl font-bold text-[var(--text-primary)] transition active:scale-95"
@@ -1518,19 +1498,31 @@ export default function StudentConsole() {
               {activeGameIndex === 1 && (
                 <div className="space-y-4">
                   <h4 className="text-lg font-black text-[var(--text-primary)]">
-                    {studentLang === "sat" ? "ᱟᱠᱷᱚᱨ: 'ᱚ' ᱪᱤᱦᱱᱟᱹᱣ ᱢᱮ" : "वर्णमाला: अक्षर 'अ' पहचानें"}
+                    {studentLang === "sat"
+                      ? "ᱟᱠᱷᱚᱨ: 'ᱚ' ᱪᱤᱦᱱᱟᱹᱣ ᱢᱮ"
+                      : studentLang === "hi"
+                      ? "वर्णमाला: अक्षर 'अ' पहचानें"
+                      : studentLang === "bn"
+                      ? "বর্ণমালা: 'অ' অক্ষরটি চিহ্নিত করুন"
+                      : studentLang === "mr"
+                      ? "वर्णमाला: 'अ' अक्षर ओळखा"
+                      : studentLang === "ta"
+                      ? "எழுத்து: 'அ' எழுத்தை அடையாளம் காணவும்"
+                      : studentLang === "te"
+                      ? "అక్షరం: 'అ' అక్షరాన్ని గుర్తించండి"
+                      : "Alphabet: Identify letter 'A'"}
                   </h4>
                   <div className="text-6xl py-6 bg-[var(--violet-tint)] text-[var(--violet)] rounded-2xl font-black border border-[var(--violet-tint)]">
-                    {studentLang === "sat" ? "ᱚ" : "अ"}
+                    {studentLang === "sat" ? "ᱚ" : studentLang === "hi" || studentLang === "mr" ? "अ" : studentLang === "bn" ? "অ" : studentLang === "ta" ? "அ" : studentLang === "te" ? "అ" : "A"}
                   </div>
                   <div className="grid grid-cols-3 gap-3 pt-2">
-                    {(studentLang === "sat" ? ["ᱚ", "ᱛ", "ᱜ"] : ["अ", "क", "म"]).map((char) => (
+                    {(studentLang === "sat" ? ["ᱚ", "ᱛ", "ᱜ"] : studentLang === "hi" || studentLang === "mr" ? ["अ", "क", "म"] : studentLang === "bn" ? ["অ", "ক", "ম"] : studentLang === "ta" ? ["அ", "க", "ம"] : studentLang === "te" ? ["అ", "క", "మ"] : ["A", "B", "C"]).map((char) => (
                       <button
                         key={char}
                         onClick={() => {
-                          if (char === (studentLang === "sat" ? "ᱚ" : "अ")) {
+                          if (char === (studentLang === "sat" ? "ᱚ" : studentLang === "hi" || studentLang === "mr" ? "अ" : studentLang === "bn" ? "অ" : studentLang === "ta" ? "அ" : studentLang === "te" ? "అ" : "A")) {
                             setGameScore((s) => s + 10);
-                            playSyntheticAudio(studentLang === "sat" ? "ᱟᱹᱰᱤ ᱵᱮᱥ!" : "बहुत बढ़िया!", studentLang);
+                            playSyntheticAudio(studentLang === "sat" ? "ᱟᱹᱰᱤ ᱵᱮᱥ!" : studentLang === "hi" ? "बहुत बढ़िया!" : "Well done!", studentLang);
                           }
                         }}
                         className="py-4 rounded-2xl bg-[var(--surface-2)] border-2 border-[var(--border)] hover:border-[var(--brand)] text-3xl font-black text-[var(--text-primary)] transition active:scale-95"
@@ -1545,22 +1537,44 @@ export default function StudentConsole() {
               {activeGameIndex === 2 && (
                 <div className="space-y-4">
                   <h4 className="text-lg font-black text-[var(--text-primary)]">
-                    {studentLang === "sat" ? "ᱡᱤᱣᱤᱭᱟᱹᱞᱤ: ᱱᱩᱭ ᱫᱚ ᱚᱠᱚᱭ? (Animal Sound)" : "पशु ज्ञान: यह कौन सा जानवर है?"}
+                    {studentLang === "sat"
+                      ? "ᱡᱤᱣᱤᱭᱟᱹᱞᱤ: ᱱᱩᱭ ᱫᱚ ᱚᱠᱚᱭ?"
+                      : studentLang === "hi"
+                      ? "पशु ज्ञान: यह कौन सा जानवर है?"
+                      : studentLang === "bn"
+                      ? "প্রাণী পরিচিতি: এটি কোন প্রাণী?"
+                      : studentLang === "mr"
+                      ? "प्राणी ज्ञान: हा कोणता प्राणी आहे?"
+                      : studentLang === "ta"
+                      ? "விலங்கு அறிவு: இது எந்த விலங்கு?"
+                      : studentLang === "te"
+                      ? "జంతు జ్ఞానం: ఇది ఏ జంతువు?"
+                      : "Animal Knowledge: Which animal is this?"}
                   </h4>
                   <div className="text-6xl py-6 bg-[var(--green-tint)] rounded-2xl border border-[var(--green-tint)]">
                     🐘
                   </div>
                   <div className="grid grid-cols-2 gap-3 pt-2">
                     {(studentLang === "sat"
-                      ? [{ name: "ᱦᱟᱹᱛᱤ (Elephant)", correct: true }, { name: "ᱥᱤᱢ (Rooster)", correct: false }]
-                      : [{ name: "हाथी (Elephant)", correct: true }, { name: "शेर (Lion)", correct: false }]
+                      ? [{ name: "ᱦᱟᱹᱛᱤ", correct: true }, { name: "ᱥᱤᱢ", correct: false }]
+                      : studentLang === "hi"
+                      ? [{ name: "हाथी", correct: true }, { name: "शेर", correct: false }]
+                      : studentLang === "bn"
+                      ? [{ name: "হাতি", correct: true }, { name: "সিংহ", correct: false }]
+                      : studentLang === "mr"
+                      ? [{ name: "हत्ती", correct: true }, { name: "सिंह", correct: false }]
+                      : studentLang === "ta"
+                      ? [{ name: "யானை", correct: true }, { name: "சிங்கம்", correct: false }]
+                      : studentLang === "te"
+                      ? [{ name: "ఏనుగు", correct: true }, { name: "సింహం", correct: false }]
+                      : [{ name: "Elephant", correct: true }, { name: "Rooster", correct: false }]
                     ).map((opt, idx) => (
                       <button
                         key={idx}
                         onClick={() => {
                           if (opt.correct) {
                             setGameScore((s) => s + 10);
-                            playSyntheticAudio(studentLang === "sat" ? "ᱥᱟᱹᱨᱤ ᱜᱮ! ᱦᱟᱹᱛᱤ" : "सही उत्तर! हाथी", studentLang);
+                            playSyntheticAudio(studentLang === "sat" ? "ᱥᱟᱹᱨᱤ ᱜᱮ! ᱦᱟᱹᱛᱤ" : studentLang === "hi" ? "सही उत्तर! हाथी" : "Correct! Elephant", studentLang);
                           }
                         }}
                         className="py-3.5 rounded-xl bg-[var(--surface-2)] border-2 border-[var(--border)] hover:border-[var(--brand)] text-sm font-bold text-[var(--text-primary)] transition active:scale-95"
@@ -1579,13 +1593,13 @@ export default function StudentConsole() {
                   disabled={activeGameIndex === 0}
                   className="px-4 py-2 rounded-xl bg-[var(--surface-2)] text-[var(--text-secondary)] font-bold text-xs disabled:opacity-40"
                 >
-                  ← Previous Game
+                  ← {t("prevGame")}
                 </button>
                 <button
                   onClick={() => setActiveGameIndex((i) => (i + 1) % 3)}
                   className="px-4 py-2 rounded-xl vs-btn-brand text-xs"
                 >
-                  Next Game →
+                  {t("nextGame")} →
                 </button>
               </div>
             </div>
@@ -1635,7 +1649,7 @@ export default function StudentConsole() {
               disabled={!newCodeInput.trim()}
               className="w-full vs-btn-brand py-3 rounded-xl text-sm font-extrabold shadow-sm disabled:opacity-50"
             >
-              Join Classroom
+              {t("joinClassroom")}
             </button>
           </div>
         </div>
@@ -1645,10 +1659,9 @@ export default function StudentConsole() {
       {showServerModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
           <div className="vs-surface w-full max-w-md rounded-3xl p-6 border border-[var(--border)] shadow-2xl space-y-4">
-            <h3 className="text-base font-extrabold text-[var(--text-primary)]">Teacher&apos;s server URL</h3>
+            <h3 className="text-base font-extrabold text-[var(--text-primary)]">{t("serverUrlTitle")}</h3>
             <p className="text-xs text-[var(--text-muted)]">
-              Ask the teacher for the server address shown on their screen (same Wi-Fi required) and enter it here,
-              e.g. <span className="font-mono">http://192.168.1.5:8000</span>. Then enter the class CODE.
+              {t("serverUrlSub")}
             </p>
             <input
               type="text"
@@ -1662,7 +1675,7 @@ export default function StudentConsole() {
                 onClick={() => setShowServerModal(false)}
                 className="flex-1 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-bold text-[var(--text-secondary)]"
               >
-                Cancel
+                {t("cancel")}
               </button>
               <button
                 onClick={async () => {
@@ -1676,7 +1689,7 @@ export default function StudentConsole() {
                 }}
                 className="flex-1 vs-btn-brand py-2.5 rounded-xl text-xs font-extrabold"
               >
-                Save & Connect
+                {t("saveAndConnect")}
               </button>
             </div>
           </div>

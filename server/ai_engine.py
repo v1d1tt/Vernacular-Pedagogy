@@ -232,6 +232,11 @@ def translate_speech(original_text: str, source_lang: str, target_languages: Lis
 
     # Check curated dictionary first
     lexicon_match = CLASSROOM_LEXICON.get(clean_text)
+    if not lexicon_match:
+        for lex_key, lex_translations in CLASSROOM_LEXICON.items():
+            if lex_key.lower() in clean_text.lower() or clean_text.lower() in lex_key.lower():
+                lexicon_match = lex_translations
+                break
 
     for tgt in target_languages:
         if tgt == source_lang:
@@ -242,19 +247,17 @@ def translate_speech(original_text: str, source_lang: str, target_languages: Lis
             # Neural translation via IndicTrans2 ONNX INT8
             try:
                 translated = edge_ai.translate_indic(clean_text, src_lang=source_lang, tgt_lang=tgt)
-                if translated and translated.strip():
+                if translated and translated.strip() and not translated.strip().startswith("["):
                     translations[tgt] = translated.strip()
                 else:
-                    lang_label = LANGUAGES.get(tgt, tgt)
-                    translations[tgt] = f"[{lang_label}] {clean_text}"
+                    translations[tgt] = translate_activity_item(clean_text, tgt)
             except Exception as e:
                 logger.warning(f"Translation error: {e}")
-                lang_label = LANGUAGES.get(tgt, tgt)
-                translations[tgt] = f"[{lang_label}] {clean_text}"
+                translations[tgt] = translate_activity_item(clean_text, tgt)
 
-    # Calculate real TTFA (target strictly < 3.0 seconds)
+    # Calculate real TTFA (actual execution latency in seconds)
     elapsed = time.time() - start_time
-    ttfa = round(max(0.35, min(1.85, elapsed + 0.42)), 2)
+    ttfa = round(max(0.01, elapsed), 2)
 
     return {
         "source_lang": source_lang,
@@ -360,6 +363,13 @@ TEMPLATE_LEXICON = {
         "sat": "ᱛᱮᱦᱮᱧᱟᱜ ᱯᱟᱴ ᱨᱮᱱᱟᱜ ᱢᱤᱫ ᱢᱩᱬᱩᱛ ᱠᱟᱛᱷᱟ",
         "en": "A key concept from today's lesson"
     },
+    "आज की कक्षा में किस मुख्य विषय या अवधारणा के बारे में सीखा गया?": {
+        "hi": "आज की कक्षा में किस मुख्य विषय या अवधारणा के बारे में सीखा गया?",
+        "sat": "ᱛᱮᱦᱮᱧᱟᱜ ᱪᱟᱱᱚᱪ ᱨᱮ ᱢᱩᱬᱩᱛ ᱞᱮᱠᱟᱛᱮ ᱪᱮᱫ ᱥᱟᱛᱟᱢ ᱪᱮᱛᱟᱱ ᱨᱮ ᱜᱟᱞᱢᱟᱨᱟᱣ ᱦᱩᱭᱮᱱᱟ?",
+        "en": "What was the main topic or concept taught in today's lesson?",
+        "bn": "আজকের ক্লাসে কোন মূল ধারণা বা বিষয়টি শেখানো হয়েছে?",
+        "mr": "आजच्या पाठात मुख्यत्वे कोणत्या संकल्पनेवर चर्चा झाली?"
+    },
     "Today's Topic": {
         "hi": "आज का विषय",
         "sat": "ᱛᱮᱦᱮᱧᱟᱜ ᱥᱟᱛᱟᱢ",
@@ -378,23 +388,63 @@ TEMPLATE_LEXICON = {
 }
 
 
+# Curated educational terms and subject vocabulary translations across all supported languages
+ACTIVITY_LEXICON: Dict[str, Dict[str, str]] = {
+    "Grade 1": {"hi": "कक्षा 1", "sat": "ᱪᱟᱱᱟᱪ ᱑", "bn": "শ্রেণী ১", "mr": "वर्ग १", "ta": "வகுப்பு 1", "te": "తరగతి 1", "en": "Grade 1"},
+    "Grade 2": {"hi": "कक्षा 2", "sat": "ᱪᱟᱱᱟᱪ ᱒", "bn": "শ্রেণী ২", "mr": "वर्ग २", "ta": "வகுப்பு 2", "te": "తరగతి 2", "en": "Grade 2"},
+    "Grade 3": {"hi": "कक्षा 3", "sat": "ᱪᱟᱱᱟᱪ ᱓", "bn": "শ্রেণী ৩", "mr": "वर्ग ३", "ta": "வகுப்பு 3", "te": "తరగతి 3", "en": "Grade 3"},
+    "Quiz": {"hi": "प्रश्नोत्तरी", "sat": "ᱠᱩᱠᱞᱤ ᱠᱷᱮᱞ", "bn": "কুইজ", "mr": "प्रश्नोत्तरी", "ta": "வினாடி வினா", "te": "క్విజ్", "en": "Quiz"},
+    "Worksheet": {"hi": "कार्यपत्रक", "sat": "ᱣᱟᱨᱠᱥᱤᱴ", "bn": "ওয়ার্কশীট", "mr": "वर्कशीट", "ta": "பணித்தாள்", "te": "వర్క్‌షీట్", "en": "Worksheet"},
+    "Vocabulary": {"hi": "शब्दावली", "sat": "ᱯᱷᱞᱮᱥ ᱠᱟᱨᱰ", "bn": "শব্দভাণ্ডার", "mr": "शब्दावली", "ta": "சொற்களஞ்சியம்", "te": "పదజాలం", "en": "Vocabulary"},
+    "Concept": {"hi": "अवधारणा", "sat": "ᱥᱟᱛᱟᱢ", "bn": "ধারণা", "mr": "संकल्पना", "ta": "கருத்து", "te": "భావన", "en": "Concept"},
+    "Answer:": {"hi": "उत्तर:", "sat": "ᱛᱮᱞᱟ:", "bn": "উত্তর:", "mr": "उत्तर:", "ta": "பதில்:", "te": "సమాధానం:", "en": "Answer:"},
+    "Mathematics": {"hi": "गणित", "sat": "ᱮᱞᱠᱷᱟ", "bn": "গণিত", "mr": "गणित", "ta": "கணிதம்", "te": "గణితం", "en": "Mathematics"},
+    "Literacy": {"hi": "साक्षरता एवं भाषा", "sat": "ᱚᱞ ᱟᱨ ᱯᱟᱹᱨᱥᱤ", "bn": "সাক্ষরতা", "mr": "साक्षरता", "ta": "எழுத்தறிவு", "te": "అక్షరాస్యత", "en": "Literacy"},
+    "Science": {"hi": "पर्यावरण एवं विज्ञान", "sat": "ᱯᱚᱨᱤᱵᱮᱥ ᱟᱨ ᱥᱟᱭᱤᱱᱥ", "bn": "বিজ্ঞান", "mr": "विज्ञान", "ta": "அறிவியல்", "te": "సైన్స్", "en": "Science"},
+    "EVS": {"hi": "पर्यावरण अध्ययन", "sat": "ᱯᱚᱨᱤᱵᱮᱥ ᱪᱮᱫᱚᱜ", "bn": "পরিবেশ পরিচিতি", "mr": "पर्यावरण अभ्यास", "ta": "சூழ்நிலையியல்", "te": "పరిసరాల విజ్ఞానం", "en": "EVS"},
+    "General Knowledge": {"hi": "सामान्य ज्ञान", "sat": "ᱥᱟᱫᱷᱟᱨᱚᱱ ᱡᱟᱱᱟᱢ", "bn": "সাধারণ জ্ঞান", "mr": "सामान्य ज्ञान", "ta": "பொது அறிவு", "te": "సాధారణ పరిజ్ఞానం", "en": "General Knowledge"},
+    "History": {"hi": "इतिहास", "sat": "ᱤᱛᱤᱦᱟᱥ", "bn": "ইতিহাস", "mr": "इतिहास", "ta": "வரலாறு", "te": "చరిత్ర", "en": "History"},
+    "Geography": {"hi": "भूगोल", "sat": "ᱵᱷᱩᱜᱳᱞ", "bn": "ভূগোল", "mr": "भूगोल", "ta": "புவியியல்", "te": "భూగోళశాస్త్రం", "en": "Geography"},
+    "Astronomy": {"hi": "खगोल विज्ञान", "sat": "ᱤᱯᱤᱞ ᱥᱟᱭᱤᱱᱥ", "bn": "জ্যোতির্বিদ্যা", "mr": "खगोलशास्त्र", "ta": "வானியல்", "te": "ఖగోళ శాస్త్రం", "en": "Astronomy"},
+    "Cooking": {"hi": "पाक कला", "sat": "ᱫᱟᱠᱟ ᱩᱛᱩ", "bn": "রন্ধনশিল্প", "mr": "पाककला", "ta": "சமையல்", "te": "వంట", "en": "Cooking"},
+    "Music": {"hi": "संगीत", "sat": "ᱥᱮᱨᱮᱧ", "bn": "সঙ্গীত", "mr": "संगीत", "ta": "இசை", "te": "<ctrl42>ᱥᱟᱝᱜᱤᱛ", "en": "Music"},
+    "Painting": {"hi": "चित्रकला", "sat": "ᱪᱤᱛᱟᱹᱨ ᱚᱞ", "bn": "চিত্রকলা", "mr": "चित्रकला", "ta": "ஓவியம்", "te": "చిత్రలేఖనం", "en": "Painting"},
+    "Reading": {"hi": "पठन (पढ़ना)", "sat": "ᱯᱟᱲᱦᱟᱣ", "bn": "পড়া", "mr": "वाचन", "ta": "வாசிப்பு", "te": "చదవడం", "en": "Reading"},
+    "Sentences": {"hi": "वाक्य", "sat": "ᱠᱟᱛᱷᱟ", "bn": "বাক্য", "mr": "वाक्य", "ta": "வாக்கியங்கள்", "te": "వాక్యాలు", "en": "Sentences"},
+    "Addition": {"hi": "जोड़ (योग)", "sat": "ᱡᱚᱲ", "bn": "যোগ", "mr": "बेरीज", "ta": "கூட்டல்", "te": "కూడిక", "en": "Addition"},
+    "Subtraction": {"hi": "घटाव (अंतर)", "sat": "ᱵᱷᱮᱜᱟᱨ", "bn": "বিয়োগ", "mr": "वजाबाकी", "ta": "கழித்தல்", "te": "తీసివేత", "en": "Subtraction"},
+    "Counting": {"hi": "गिनती (संख्याएँ)", "sat": "ᱞᱮᱠᱷᱟ", "bn": "গণনা", "mr": "मोजणी", "ta": "எண்ணிக்கை", "te": "లెక్కించడం", "en": "Counting"},
+    "Shapes": {"hi": "आकृतियाँ (आकार)", "sat": "ᱪᱤᱛᱟᱹᱨ", "bn": "আকৃতি", "mr": "आकार", "ta": "வடிவங்கள்", "te": "ఆకారాలు", "en": "Shapes"},
+    "Numbers": {"hi": "संख्याएँ", "sat": "ᱮᱞᱠᱷᱟ", "bn": "সংখ্যা", "mr": "संख्या", "ta": "எண்கள்", "te": "సంఖ్యలు", "en": "Numbers"},
+    "Lesson": {"hi": "पाठ", "sat": "ᱯᱟᱴ", "bn": "পাঠ", "mr": "पाठ", "ta": "பாடம்", "te": "పాఠం", "en": "Lesson"},
+    "General": {"hi": "सामान्य", "sat": "ᱥᱟᱫᱷᱟᱨᱚᱱ", "bn": "সাধারণ", "mr": "सामान्य", "ta": "பொது", "te": "సాధారణ", "en": "General"}
+}
+
 def translate_activity_item(text: str, target_lang: str) -> str:
-    """Translates text items into target student language."""
-    if not text or target_lang == "en":
-        return text
+    """Translates text items into target student/teacher language script."""
+    if not text:
+        return ""
     clean = text.strip()
+    if clean in ACTIVITY_LEXICON and target_lang in ACTIVITY_LEXICON[clean]:
+        return ACTIVITY_LEXICON[clean][target_lang]
     if clean in TEMPLATE_LEXICON and target_lang in TEMPLATE_LEXICON[clean]:
         return TEMPLATE_LEXICON[clean][target_lang]
     if clean in CLASSROOM_LEXICON and target_lang in CLASSROOM_LEXICON[clean]:
         return CLASSROOM_LEXICON[clean][target_lang]
 
-    # Try neural MT
-    try:
-        translated = edge_ai.translate_indic(clean, src_lang="en", tgt_lang=target_lang)
-        if translated and translated.strip() and not translated.startswith("["):
-            return translated.strip()
-    except Exception as e:
-        logger.warning(f"MT activity translate failed: {e}")
+    # Case-insensitive / substring lookup in ACTIVITY_LEXICON
+    for key, val_map in ACTIVITY_LEXICON.items():
+        if key.lower() == clean.lower() and target_lang in val_map:
+            return val_map[target_lang]
+
+    # Neural MT fallback
+    if target_lang != "en":
+        try:
+            translated = edge_ai.translate_indic(clean, src_lang="en", tgt_lang=target_lang)
+            if translated and translated.strip() and not translated.startswith("["):
+                return translated.strip()
+        except Exception as e:
+            logger.warning(f"MT activity translate failed: {e}")
 
     return clean
 
@@ -423,34 +473,39 @@ def _extract_keywords(transcript: str) -> list:
     return extracted
 
 
-def _build_quiz_from_transcript(transcript: str, grade: int, slm_question: str, lang: str = "hi") -> dict:
-    """Build contextually relevant, lesson-aware quiz questions directly from lesson transcript keywords."""
+def _build_quiz_from_transcript(transcript: str, grade: int, slm_question: str, lang: str = "hi", subject: str = "Mathematics") -> dict:
+    """Build contextually relevant, lesson-aware quiz questions directly from lesson transcript keywords and subject."""
     import random
     keywords = _extract_keywords(transcript)
 
-    # Subject fallbacks based on grade only if transcript is exceptionally brief
-    default_topics = {
-        1: ["Addition", "Counting", "Shapes", "Nature", "Animals"],
-        2: ["Reading", "Sentences", "Environment", "Plants", "Mathematics"],
-        3: ["Solar System", "Multiplication", "Water Cycle", "Grammar", "Ecosystem"]
-    }
-    fallback_list = default_topics.get(grade, ["Learning", "Discovery", "Practice"])
+    subj_clean = (subject or "Mathematics").lower()
+    if "math" in subj_clean or "गणित" in subj_clean or "ᱮᱞᱠᱷᱟ" in subj_clean:
+        default_topics = ["Addition", "Subtraction", "Counting", "Shapes", "Numbers"]
+    elif "literacy" in subj_clean or "language" in subj_clean or "भाषा" in subj_clean or "ᱚᱞ" in subj_clean:
+        default_topics = ["Alphabet", "Sentences", "Reading", "Grammar", "Vocabulary"]
+    elif "science" in subj_clean or "evs" in subj_clean or "पर्यावरण" in subj_clean or "ᱯᱚᱨᱤᱵᱮᱥ" in subj_clean:
+        default_topics = ["Plants", "Animals", "Water Cycle", "Environment", "Weather"]
+    else:
+        default_topics = ["History", "Geography", "Festivals", "General Knowledge", "Lessons"]
 
-    kw_pool = list(keywords)
-    for fb in fallback_list:
+    # Filter keywords to avoid phonetic noise fragments like maths, tan, tham, ev, abh
+    NOISE_WORDS = {"maths", "math", "tan", "tham", "ev", "abh", "sub", "deg", "var"}
+    valid_kw = [k for k in keywords if len(k) >= 3 and k.lower() not in NOISE_WORDS]
+
+    kw_pool = list(valid_kw)
+    for fb in default_topics:
         if fb not in kw_pool:
             kw_pool.append(fb)
 
     raw_topic1 = kw_pool[0]
-    raw_topic2 = kw_pool[1] if len(kw_pool) > 1 else fallback_list[1]
-    raw_topic3 = kw_pool[2] if len(kw_pool) > 2 else fallback_list[2]
+    raw_topic2 = kw_pool[1] if len(kw_pool) > 1 else default_topics[1]
+    raw_topic3 = kw_pool[2] if len(kw_pool) > 2 else default_topics[2]
 
     # Translate topics into target language
     topic1 = translate_activity_item(raw_topic1, lang)
     topic2 = translate_activity_item(raw_topic2, lang)
     topic3 = translate_activity_item(raw_topic3, lang)
 
-    # Contextual distractors translated
     distractor_pool = [
         translate_activity_item("History", lang),
         translate_activity_item("Geography", lang),
@@ -460,19 +515,15 @@ def _build_quiz_from_transcript(transcript: str, grade: int, slm_question: str, 
         translate_activity_item("Painting", lang),
     ]
 
-    # Validate SLM output to discard off-topic hallucinations
+    # Validate SLM output to discard off-topic hallucinations or English strings in non-English mode
     is_valid_slm = False
-    if slm_question and len(slm_question.strip()) > 10:
+    if slm_question and len(slm_question.strip()) > 10 and lang == "en":
         low_q = slm_question.lower()
-        off_topic_words = [
-            "france", "capital", "paris", "president", "washington", "country",
-            "scholarship", "scholarships", "election", "government", "minister"
-        ]
+        off_topic_words = ["france", "capital", "paris", "president", "washington", "country", "scholarship", "election"]
         if not any(w in low_q for w in off_topic_words):
-            if any(k.lower() in low_q for k in keywords) or any(w in low_q for w in ["what", "how", "count", "add", "why"]):
-                is_valid_slm = True
+            is_valid_slm = True
 
-    # --- Question 1: Core lesson concept ---
+    # --- Question 1 ---
     if is_valid_slm:
         q1_text = translate_activity_item(slm_question.strip(), lang)
     else:
@@ -490,7 +541,7 @@ def _build_quiz_from_transcript(transcript: str, grade: int, slm_question: str, 
     q1_opts = [topic1, topic2, distractor_pool[0], distractor_pool[1]]
     random.shuffle(q1_opts)
 
-    # --- Question 2: Lesson detail or key term ---
+    # --- Question 2 ---
     if lang == "hi":
         q2_text = f"आज के पाठ के अनुसार, '{topic2}' से कौन सी बात सीधे संबंधित है?"
     elif lang == "sat":
@@ -505,36 +556,20 @@ def _build_quiz_from_transcript(transcript: str, grade: int, slm_question: str, 
     q2_opts = [topic2, distractor_pool[2], distractor_pool[3], topic3]
     random.shuffle(q2_opts)
 
-    # --- Question 3: Vocabulary and comprehension in context ---
-    # Check if numbers were explicitly discussed in the transcript
-    import re
-    nums_in_text = re.findall(r'\b\d+\b', transcript)
-    if nums_in_text and len(nums_in_text) >= 2:
-        n1, n2 = int(nums_in_text[0]), int(nums_in_text[1])
-        ans = str(n1 + n2)
-        if lang == "hi":
-            q3_text = f"कक्षा में चर्चा किए गए अंकों ({n1} और {n2}) का योग क्या है?"
-        elif lang == "sat":
-            q3_text = f"ᱪᱟᱱᱚᱪ ᱨᱮ ᱞᱟᱹᱭ ᱟᱠᱟᱱ ᱮᱞᱠᱷᱟ ({n1} ᱟᱨ {n2}) ᱡᱚᱲᱟᱣ ᱠᱟᱛᱮ ᱛᱤᱱᱟᱹᱜ ᱦᱩᱭᱩᱜᱼᱟ?"
-        else:
-            q3_text = f"Based on the numbers discussed in class ({n1} and {n2}), what is their sum?"
-        q3_opts = [ans, str(n1 + n2 + 1), str(max(1, n1 + n2 - 1)), str(n1 + n2 + 2)]
-        random.shuffle(q3_opts)
-        q3_correct = ans
+    # --- Question 3 ---
+    if lang == "hi":
+        q3_text = f"आज सीखे गए पाठ में इनमें से कौन सा महत्वपूर्ण शब्द/विचार आया था?"
+    elif lang == "sat":
+        q3_text = f"ᱛᱮᱦᱮᱧ ᱪᱮᱫ ᱟᱠᱟᱱ ᱯᱟᱴ ᱨᱮ ᱱᱚᱶᱟ ᱠᱚ ᱢᱩᱫᱽ ᱨᱮ ᱚᱠᱟ ᱟᱹᱲᱟᱹ ᱦᱮᱡ ᱞᱮᱱᱟ?"
+    elif lang == "bn":
+        q3_text = f"আজকের ক্লাসে নিচের কোন শব্দটি বিশেষভাবে আলোচিত হয়েছে?"
+    elif lang == "mr":
+        q3_text = f"वर्गादरम्यान खालीलपैकी कोणता महत्त्वाचा घटक शिकवला गेला?"
     else:
-        if lang == "hi":
-            q3_text = f"आज सीखे गए पाठ में इनमें से कौन सा महत्वपूर्ण शब्द/विचार आया था?"
-        elif lang == "sat":
-            q3_text = f"ᱛᱮᱦᱮᱧ ᱪᱮᱫ ᱟᱠᱟᱱ ᱯᱟᱴ ᱨᱮ ᱱᱚᱶᱟ ᱠᱚ ᱢᱩᱫᱽ ᱨᱮ ᱚᱠᱟ ᱟᱹᱲᱟᱹ ᱦᱮᱡ ᱞᱮᱱᱟ?"
-        elif lang == "bn":
-            q3_text = f"আজকের ক্লাসে নিচের কোন শব্দটি বিশেষভাবে আলোচিত হয়েছে?"
-        elif lang == "mr":
-            q3_text = f"वर्गादरम्यान खालीलपैकी कोणता महत्त्वाचा घटक शिकवला गेला?"
-        else:
-            q3_text = f"Which of the following concepts was directly explored in today's class?"
-        q3_opts = [topic3, distractor_pool[4], distractor_pool[5], translate_activity_item("General", lang)]
-        random.shuffle(q3_opts)
-        q3_correct = topic3
+        q3_text = f"Which of the following concepts was directly explored in today's class?"
+    q3_opts = [topic3, distractor_pool[4], distractor_pool[5], translate_activity_item("General", lang)]
+    random.shuffle(q3_opts)
+    q3_correct = topic3
 
     return {
         "questions": [
@@ -565,16 +600,32 @@ def _build_quiz_from_transcript(transcript: str, grade: int, slm_question: str, 
     }
 
 
-def _build_flashcards_from_transcript(transcript: str, grade: int, lang: str = "hi") -> list:
-    """Build flashcards from lesson vocabulary keywords."""
+
+def _build_flashcards_from_transcript(transcript: str, grade: int, lang: str = "hi", subject: str = "Mathematics") -> list:
+    """Build flashcards from lesson vocabulary keywords and subject domain."""
     keywords = _extract_keywords(transcript)
     VISUALS = ["📚", "🌟", "🎯", "🔢", "📐", "🌿", "💡", "🎨", "🔤", "🌍"]
     COLORS = ["#FB773C", "#2EB9DF", "#EB3678", "#EC4899", "#22c55e", "#8b5cf6", "#f59e0b", "#06b6d4"]
 
+    NOISE_WORDS = {"maths", "math", "tan", "tham", "ev", "abh", "sub", "deg", "var"}
+    valid_kw = [k for k in keywords if len(k) >= 3 and k.lower() not in NOISE_WORDS]
+
+    subj_clean = (subject or "Mathematics").lower()
+    if "math" in subj_clean or "गणित" in subj_clean or "ᱮᱞᱠᱷᱟ" in subj_clean:
+        subject_defaults = ["Addition", "Subtraction", "Counting", "Shapes", "Numbers"]
+    elif "literacy" in subj_clean or "language" in subj_clean or "भाषा" in subj_clean:
+        subject_defaults = ["Sentences", "Reading", "Vocabulary", "Lesson"]
+    else:
+        subject_defaults = ["General Knowledge", "Lesson", "Concept"]
+
+    for fb in subject_defaults:
+        if fb not in valid_kw:
+            valid_kw.append(fb)
+
     meaning_text = translate_activity_item("A key concept from today's lesson", lang)
 
     cards = []
-    for i, kw in enumerate(keywords[:6]):
+    for i, kw in enumerate(valid_kw[:6]):
         translated_word = translate_activity_item(kw, lang)
         cards.append({
             "word": translated_word,
@@ -584,23 +635,23 @@ def _build_flashcards_from_transcript(transcript: str, grade: int, lang: str = "
             "color": COLORS[i % len(COLORS)]
         })
 
-    if not cards:
-        w1 = translate_activity_item("Today's Topic", lang)
-        w2 = translate_activity_item("Learning", lang)
-        w3 = translate_activity_item("Practice", lang)
-        cards = [
-            {"word": w1, "phonics": "-".join(w1[:4]), "meaning": translate_activity_item("The main subject taught today", lang), "visual": "📚", "color": "#FB773C"},
-            {"word": w2, "phonics": "-".join(w2[:4]), "meaning": translate_activity_item("Gaining new knowledge and skills", lang), "visual": "🌟", "color": "#2EB9DF"},
-            {"word": w3, "phonics": "-".join(w3[:4]), "meaning": translate_activity_item("Repeating exercises to improve understanding", lang), "visual": "🎯", "color": "#EC4899"},
-        ]
     return cards
 
 
-def _build_worksheet_from_transcript(transcript: str, grade: int, lang: str = "hi") -> list:
+def _build_worksheet_from_transcript(transcript: str, grade: int, lang: str = "hi", subject: str = "Mathematics") -> list:
     """Build interactive worksheet tasks based on transcript."""
     keywords = _extract_keywords(transcript)
-    kw1_raw = keywords[0] if keywords else "Topic"
-    kw2_raw = keywords[1] if len(keywords) > 1 else "Concept"
+    NOISE_WORDS = {"maths", "math", "tan", "tham", "ev", "abh", "sub", "deg", "var"}
+    valid_kw = [k for k in keywords if len(k) >= 3 and k.lower() not in NOISE_WORDS]
+
+    subj_clean = (subject or "Mathematics").lower()
+    if "math" in subj_clean or "गणित" in subj_clean or "ᱮᱞᱠᱷᱟ" in subj_clean:
+        default_kw1, default_kw2 = "Addition", "Counting"
+    else:
+        default_kw1, default_kw2 = "Lesson", "Concept"
+
+    kw1_raw = valid_kw[0] if valid_kw else default_kw1
+    kw2_raw = valid_kw[1] if len(valid_kw) > 1 else default_kw2
 
     kw1 = translate_activity_item(kw1_raw, lang)
     kw2 = translate_activity_item(kw2_raw, lang)
@@ -625,10 +676,13 @@ def _build_worksheet_from_transcript(transcript: str, grade: int, lang: str = "h
     ]
 
 
-def _build_game_from_transcript(transcript: str, grade: int, lang: str = "hi") -> list:
+def _build_game_from_transcript(transcript: str, grade: int, lang: str = "hi", subject: str = "Mathematics") -> list:
     """Build interactive audio-visual FLN games."""
     keywords = _extract_keywords(transcript)
-    kw1_raw = keywords[0] if keywords else "Apples"
+    NOISE_WORDS = {"maths", "math", "tan", "tham", "ev", "abh", "sub", "deg", "var"}
+    valid_kw = [k for k in keywords if len(k) >= 3 and k.lower() not in NOISE_WORDS]
+
+    kw1_raw = valid_kw[0] if valid_kw else "Addition"
     kw1 = translate_activity_item(kw1_raw, lang)
 
     if lang == "hi":
@@ -638,8 +692,8 @@ def _build_game_from_transcript(transcript: str, grade: int, lang: str = "hi") -
         g1_title = f"ᱞᱮᱠᱷᱟ ᱮᱱᱮᱡ: ᱛᱤᱱᱟᱹᱜ {kw1} ᱢᱮᱱᱟᱜᱼᱟ?"
         g1_instr = f"ᱪᱤᱛᱟᱹᱨ ᱨᱮ ᱛᱤᱱᱟᱹᱜ {kw1} ᱢᱮᱱᱟᱜᱼᱟ ᱞᱮᱠᱷᱟᱭ ᱢᱮ!"
     else:
-        g1_title = f"Count Apples Game: How many {kw1}?"
-        g1_instr = f"Count the {kw1} in the image and tap the correct number!"
+        g1_title = f"Count Game: How many {kw1}?"
+        g1_instr = f"Count the items in the image and tap the correct number!"
 
     return [
         {
@@ -654,54 +708,58 @@ def _build_game_from_transcript(transcript: str, grade: int, lang: str = "hi") -
     ]
 
 
-def generate_nipun_content(transcript: str, grade: int, activity_type: str, lang: str = "hi") -> Dict[str, Any]:
+def generate_nipun_content(transcript: str, grade: int, activity_type: str, lang: str = "hi", subject: str = "Mathematics") -> Dict[str, Any]:
     """
-    Generates NIPUN FLN educational activities based on the actual lesson transcript.
+    Generates NIPUN FLN educational activities based on the actual lesson transcript and class subject.
     Fully localized in target student language (Hindi, Santali Ol Chiki, etc.).
     """
-    logger.info(f"Generating {activity_type} for Grade {grade} FLN (Lang: {lang}) from transcript ({len(transcript)} chars).")
+    logger.info(f"Generating {activity_type} for Grade {grade} {subject} FLN (Lang: {lang}) from transcript ({len(transcript)} chars).")
 
     # Run on-demand SLM inference for question generation
     ai_generated_question = ""
     clean_summary = transcript.strip() if transcript else ""
     if clean_summary:
         try:
-            slm_prompt = f"Create 1 simple question for Grade {grade} students based on this lesson: {clean_summary[:150]}"
+            slm_prompt = f"Create 1 simple question for Grade {grade} {subject} students based on this lesson: {clean_summary[:150]}"
             ai_generated_question = edge_ai.generate_with_slm(slm_prompt, max_new_tokens=50)
             logger.info(f"SmolLM2 generated: '{ai_generated_question}'")
         except Exception as e:
             logger.warning(f"SmolLM2 generation error: {e}")
 
     keywords = _extract_keywords(clean_summary)
-    topic_raw = keywords[0] if keywords else "Lesson"
+    NOISE_WORDS = {"maths", "math", "tan", "tham", "ev", "abh", "sub", "deg", "var"}
+    valid_kw = [k for k in keywords if len(k) >= 3 and k.lower() not in NOISE_WORDS]
+    topic_raw = valid_kw[0] if valid_kw else subject
     topic = translate_activity_item(topic_raw, lang)
 
+    grade_label = translate_activity_item(f"Grade {grade}", lang)
+
     if activity_type == "QUIZ":
-        quiz_data = _build_quiz_from_transcript(clean_summary, grade, ai_generated_question, lang=lang)
+        quiz_data = _build_quiz_from_transcript(clean_summary, grade, ai_generated_question, lang=lang, subject=subject)
         quiz_title = translate_activity_item("Quiz", lang)
         content = {
-            "title": f"Grade {grade} {quiz_title}: {topic}",
+            "title": f"{grade_label} {quiz_title}: {topic}",
             **quiz_data
         }
     elif activity_type == "FLASHCARD":
-        cards = _build_flashcards_from_transcript(clean_summary, grade, lang=lang)
+        cards = _build_flashcards_from_transcript(clean_summary, grade, lang=lang, subject=subject)
         vocab_title = translate_activity_item("Vocabulary", lang)
         content = {
-            "title": f"Grade {grade} {vocab_title}: {topic}",
+            "title": f"{grade_label} {vocab_title}: {topic}",
             "cards": cards
         }
     elif activity_type in ["GAME", "GAMES"]:
-        games = _build_game_from_transcript(clean_summary, grade, lang=lang)
+        games = _build_game_from_transcript(clean_summary, grade, lang=lang, subject=subject)
         game_title = translate_activity_item("Game", lang)
         content = {
-            "title": f"Grade {grade} {game_title}: {topic}",
+            "title": f"{grade_label} {game_title}: {topic}",
             "games": games
         }
     else:  # WORKSHEET
-        tasks = _build_worksheet_from_transcript(clean_summary, grade, lang=lang)
+        tasks = _build_worksheet_from_transcript(clean_summary, grade, lang=lang, subject=subject)
         sheet_title = translate_activity_item("Worksheet", lang)
         content = {
-            "title": f"Grade {grade} {sheet_title}: {topic}",
+            "title": f"{grade_label} {sheet_title}: {topic}",
             "tasks": tasks
         }
 
@@ -731,9 +789,65 @@ def generate_nipun_content(transcript: str, grade: int, activity_type: str, lang
         "content": content,
         "generator": "Edge SLM (SmolLM2-360M) + Multilingual Keyword Extraction",
         "raw_slm_output": ai_generated_question,
-        "lesson_keywords": keywords[:5],
+        "lesson_keywords": valid_kw[:5],
         "language": lang
     }
+
+
+def translate_activity_content(content: Dict[str, Any], target_lang: str) -> Dict[str, Any]:
+    """
+    Translates an entire activity content dictionary into target student language script.
+    """
+    if not content:
+        return content
+
+    import copy
+    translated_content = copy.deepcopy(content)
+
+    # Translate main title
+    if "title" in translated_content and isinstance(translated_content["title"], str):
+        t_str = translated_content["title"]
+        for term, mapping in ACTIVITY_LEXICON.items():
+            if term in t_str and target_lang in mapping:
+                t_str = t_str.replace(term, mapping[target_lang])
+        translated_content["title"] = t_str
+
+    # Quiz questions & options
+    if "questions" in translated_content and isinstance(translated_content["questions"], list):
+        for q in translated_content["questions"]:
+            if "question" in q and isinstance(q["question"], str):
+                q["question"] = translate_activity_item(q["question"], target_lang)
+            if "options" in q and isinstance(q["options"], list):
+                q["options"] = [translate_activity_item(str(opt), target_lang) for opt in q["options"]]
+            if "correct" in q and isinstance(q["correct"], str):
+                q["correct"] = translate_activity_item(q["correct"], target_lang)
+
+    # Worksheet tasks
+    if "tasks" in translated_content and isinstance(translated_content["tasks"], list):
+        for task_obj in translated_content["tasks"]:
+            if "task" in task_obj and isinstance(task_obj["task"], str):
+                task_obj["task"] = translate_activity_item(task_obj["task"], target_lang)
+            if "answer" in task_obj and task_obj["answer"] and isinstance(task_obj["answer"], str):
+                task_obj["answer"] = translate_activity_item(task_obj["answer"], target_lang)
+
+    # Flashcards
+    if "cards" in translated_content and isinstance(translated_content["cards"], list):
+        for card in translated_content["cards"]:
+            if "word" in card and isinstance(card["word"], str):
+                card["word"] = translate_activity_item(card["word"], target_lang)
+                card["phonics"] = "-".join(card["word"][:4])
+            if "meaning" in card and isinstance(card["meaning"], str):
+                card["meaning"] = translate_activity_item(card["meaning"], target_lang)
+
+    # Games
+    if "games" in translated_content and isinstance(translated_content["games"], list):
+        for g in translated_content["games"]:
+            if "title" in g and isinstance(g["title"], str):
+                g["title"] = translate_activity_item(g["title"], target_lang)
+            if "instruction" in g and isinstance(g["instruction"], str):
+                g["instruction"] = translate_activity_item(g["instruction"], target_lang)
+    return translated_content
+
 
 
 

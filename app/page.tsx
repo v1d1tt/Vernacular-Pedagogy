@@ -385,7 +385,7 @@ export default function VaaniSetuOnboarding() {
             <div className="vs-surface rounded-3xl p-6 sm:p-8 space-y-6 shadow-xl border border-[var(--border)]">
               <div>
                 <div className="flex items-center gap-2 text-xs font-bold text-[var(--brand-deep)] uppercase tracking-wider mb-1">
-                  <Globe className="w-4 h-4 text-[var(--brand)]" /> Step 1 of 3
+                  <Globe className="w-4 h-4 text-[var(--brand)]" /> {t("stepCounter")} 1 / 3
                 </div>
                 <h2 className="text-2xl font-extrabold text-[var(--text-primary)] tracking-tight">
                   {t("selectLanguageTitle")}
@@ -416,7 +416,7 @@ export default function VaaniSetuOnboarding() {
               {/* Other regional languages — below primary buttons */}
               <div className="space-y-2 pt-4 border-t border-[var(--border)]">
                 <label className="text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider block">
-                  Other Languages / अन्य भाषाएं
+                  {t("otherLanguagesLabel")}
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {SUPPORTED_LANGUAGES.filter((l) => !["hi", "sat", "en"].includes(l.code)).map((langItem) => {

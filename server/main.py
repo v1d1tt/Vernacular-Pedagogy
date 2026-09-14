@@ -2,6 +2,7 @@ import uuid
 import time
 import json
 import random
+import sqlite3
 import string
 import hashlib
 from typing import Dict, Any, List, Optional
@@ -303,6 +304,17 @@ def get_active_sessions():
     sessions = [dict(row) for row in rows]
     return {"sessions": sessions}
 
+@app.get("/api/sessions/{session_id}")
+def get_session(session_id: str):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
+    session = cursor.fetchone()
+    conn.close()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return dict(session)
+
 @app.get("/api/sessions/by-code/{join_code}")
 def get_session_by_code(join_code: str):
     """Lookup an active session by its 6-char join code (case-insensitive)."""
@@ -313,6 +325,51 @@ def get_session_by_code(join_code: str):
     conn.close()
     if not session:
         raise HTTPException(status_code=404, detail="SESSION_NOT_FOUND")
+    return dict(session)
+
+@app.get("/api/teachers/{teacher_identifier}/sessions")
+def get_teacher_sessions(teacher_identifier: str):
+    """Retrieve all classrooms (both active and past) created by a teacher."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT s.*, 
+               (SELECT COUNT(*) FROM participants p WHERE p.session_id = s.id) AS participant_count
+        FROM sessions s
+        WHERE s.teacher_id = ? OR s.teacher_name = ?
+        ORDER BY s.created_at DESC
+    ''', (teacher_identifier, teacher_identifier))
+    rows = cursor.fetchall()
+    conn.close()
+    return {"sessions": [dict(r) for r in rows]}
+
+@app.post("/api/sessions/{session_id}/end")
+async def end_session(session_id: str):
+    """Marks a classroom session as ended/inactive."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE sessions SET is_active = 0 WHERE id = ?", (session_id,))
+    conn.commit()
+    conn.close()
+    await manager.broadcast_to_session(session_id, {
+        "type": "SESSION_ENDED",
+        "session_id": session_id,
+        "message": "Classroom session has ended"
+    })
+    return {"status": "SUCCESS", "session_id": session_id, "is_active": 0}
+
+@app.post("/api/sessions/{session_id}/reactivate")
+async def reactivate_session(session_id: str):
+    """Reactivates an existing classroom session."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE sessions SET is_active = 1 WHERE id = ?", (session_id,))
+    cursor.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
+    session = cursor.fetchone()
+    conn.commit()
+    conn.close()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
     return dict(session)
 
 @app.post("/api/sessions/{session_id}/join")
@@ -432,23 +489,22 @@ async def generate_content(req: GenerateContentRequest):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT original_text, source_lang FROM transcripts WHERE session_id = ? ORDER BY timestamp DESC LIMIT 20",
+        "SELECT original_text, source_lang FROM transcripts WHERE session_id = ? ORDER BY timestamp ASC LIMIT 50",
         (req.session_id,)
     )
     rows = cursor.fetchall()
 
     target_lang = req.language
-    if not target_lang or target_lang == "hi":
-        cursor.execute("SELECT teaching_language FROM sessions WHERE id = ?", (req.session_id,))
-        s_row = cursor.fetchone()
-        if s_row and s_row["teaching_language"]:
-            target_lang = s_row["teaching_language"]
+    cursor.execute("SELECT teaching_language FROM sessions WHERE id = ?", (req.session_id,))
+    s_row = cursor.fetchone()
+    if not target_lang and s_row and s_row["teaching_language"]:
+        target_lang = s_row["teaching_language"]
     conn.close()
 
-    # Build a combined lesson transcript from actual teacher speech
-    lesson_texts = [r["original_text"] for r in rows if r["source_lang"] != "STUDENT"]
-    if req.transcript_summary and req.transcript_summary.strip():
-        lesson_texts.insert(0, req.transcript_summary)
+    # Build a combined lesson transcript from actual speech
+    lesson_texts = [r["original_text"] for r in rows if r["original_text"] and r["original_text"].strip()]
+    if req.transcript_summary and req.transcript_summary.strip() and req.transcript_summary.strip() not in lesson_texts:
+        lesson_texts.append(req.transcript_summary.strip())
 
     FALLBACK_LESSON_SUMMARIES = {
         "hi": "आज का प्राथमिक पाठ एवं अभ्यास",
@@ -459,10 +515,10 @@ async def generate_content(req: GenerateContentRequest):
         "te": "ఈ రోజు పాఠం యొక్క ప్రాథమిక విషయాలు",
         "en": "Today's Primary Lesson"
     }
-    fallback_summary = FALLBACK_LESSON_SUMMARIES.get(target_lang or "hi", "Today's Primary Lesson")
-    full_transcript = " ".join(lesson_texts[:10]) if lesson_texts else req.transcript_summary or fallback_summary
+    fallback_summary = FALLBACK_LESSON_SUMMARIES.get(target_lang or "en", "Today's Primary Lesson")
+    full_transcript = " ".join(lesson_texts) if lesson_texts else req.transcript_summary or fallback_summary
 
-    activity_data = generate_nipun_content(full_transcript, req.grade, req.activity_type, lang=target_lang or "hi")
+    activity_data = generate_nipun_content(full_transcript, req.grade, req.activity_type, lang=target_lang or "en")
     activity_id = str(uuid.uuid4())[:8]
     now = time.time()
 

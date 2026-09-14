@@ -383,7 +383,7 @@ def translate_activity_item(text: str, target_lang: str) -> str:
 
 def _extract_keywords(transcript: str) -> list:
     """
-    Extract meaningful keywords from a lesson transcript (supports Multilingual/Unicode).
+    Extract meaningful lesson keywords and concepts from a lesson transcript (supports Multilingual/Unicode).
     """
     import re
     if not transcript or not transcript.strip():
@@ -401,30 +401,46 @@ def _extract_keywords(transcript: str) -> list:
             freq[w_clean] = freq.get(w_clean, 0) + 1
 
     sorted_kw = sorted(freq.items(), key=lambda x: x[1], reverse=True)
-    extracted = [k for k, _ in sorted_kw[:10]]
+    extracted = [k for k, _ in sorted_kw[:12]]
     return extracted
 
 
 def _build_quiz_from_transcript(transcript: str, grade: int, slm_question: str, lang: str = "hi") -> dict:
-    """Build contextually relevant quiz questions from lesson transcript keywords."""
+    """Build contextually relevant, lesson-aware quiz questions directly from lesson transcript keywords."""
+    import random
     keywords = _extract_keywords(transcript)
 
-    # Contextual fallbacks based on grade if transcript is short
+    # Subject fallbacks based on grade only if transcript is exceptionally brief
     default_topics = {
-        1: ["Addition", "Counting", "Numbers", "Apples"],
-        2: ["Subtraction", "Sentences", "Mathematics", "Reading"],
-        3: ["Multiplication", "Shapes", "Problem Solving", "Vocabulary"]
+        1: ["Addition", "Counting", "Shapes", "Nature", "Animals"],
+        2: ["Reading", "Sentences", "Environment", "Plants", "Mathematics"],
+        3: ["Solar System", "Multiplication", "Water Cycle", "Grammar", "Ecosystem"]
     }
-    fallback_list = default_topics.get(grade, ["Addition", "Numbers"])
+    fallback_list = default_topics.get(grade, ["Learning", "Discovery", "Practice"])
 
-    topic_raw = keywords[0] if keywords else fallback_list[0]
-    topic2_raw = keywords[1] if len(keywords) > 1 else fallback_list[1]
+    kw_pool = list(keywords)
+    for fb in fallback_list:
+        if fb not in kw_pool:
+            kw_pool.append(fb)
 
-    # Translate topic labels into target language
-    topic = translate_activity_item(topic_raw, lang)
-    topic2 = translate_activity_item(topic2_raw, lang)
-    opt_geo = translate_activity_item("Geography", lang)
-    opt_hist = translate_activity_item("History", lang)
+    raw_topic1 = kw_pool[0]
+    raw_topic2 = kw_pool[1] if len(kw_pool) > 1 else fallback_list[1]
+    raw_topic3 = kw_pool[2] if len(kw_pool) > 2 else fallback_list[2]
+
+    # Translate topics into target language
+    topic1 = translate_activity_item(raw_topic1, lang)
+    topic2 = translate_activity_item(raw_topic2, lang)
+    topic3 = translate_activity_item(raw_topic3, lang)
+
+    # Contextual distractors translated
+    distractor_pool = [
+        translate_activity_item("History", lang),
+        translate_activity_item("Geography", lang),
+        translate_activity_item("Astronomy", lang),
+        translate_activity_item("Cooking", lang),
+        translate_activity_item("Music", lang),
+        translate_activity_item("Painting", lang),
+    ]
 
     # Validate SLM output to discard off-topic hallucinations
     is_valid_slm = False
@@ -432,100 +448,100 @@ def _build_quiz_from_transcript(transcript: str, grade: int, slm_question: str, 
         low_q = slm_question.lower()
         off_topic_words = [
             "france", "capital", "paris", "president", "washington", "country",
-            "scholarship", "scholarships", "election", "government", "minister", "prime minister"
+            "scholarship", "scholarships", "election", "government", "minister"
         ]
         if not any(w in low_q for w in off_topic_words):
-            if any(k.lower() in low_q for k in keywords) or any(w in low_q for w in ["what", "how", "count", "add", "many"]):
+            if any(k.lower() in low_q for k in keywords) or any(w in low_q for w in ["what", "how", "count", "add", "why"]):
                 is_valid_slm = True
 
+    # --- Question 1: Core lesson concept ---
     if is_valid_slm:
         q1_text = translate_activity_item(slm_question.strip(), lang)
-        q1_options = [topic, topic2, opt_geo, opt_hist]
-        q1_correct = topic
     else:
         if lang == "hi":
-            q1_text = f"आज के पाठ में '{topic}' के बारे में कौन सी मुख्य अवधारणा सिखाई गई?"
+            q1_text = f"आज की कक्षा में किस मुख्य विषय या अवधारणा के बारे में सीखा गया?"
         elif lang == "sat":
-            q1_text = f"ᱛᱮᱦᱮᱧᱟᱜ ᱯᱟᱴ ᱨᱮ '{topic}' ᱵᱟᱵᱚᱛ ᱛᱮ ᱪᱮᱫ ᱢᱩᱬᱩᱛ ᱡᱤᱱᱤᱥ ᱵᱚᱱ ᱪᱮᱫᱮᱱᱟ?"
+            q1_text = f"ᱛᱮᱦᱮᱧᱟᱜ ᱪᱟᱱᱚᱪ ᱨᱮ ᱢᱩᱬᱩᱛ ᱞᱮᱠᱟᱛᱮ ᱪᱮᱫ ᱥᱟᱛᱟᱢ ᱪᱮᱛᱟᱱ ᱨᱮ ᱜᱟᱞᱢᱟᱨᱟᱣ ᱦᱩᱭᱮᱱᱟ?"
+        elif lang == "bn":
+            q1_text = f"আজকের ক্লাসে কোন মূল ধারণা বা বিষয়টি শেখানো হয়েছে?"
+        elif lang == "mr":
+            q1_text = f"आजच्या पाठात मुख्यत्वे कोणत्या संकल्पनेवर चर्चा झाली?"
         else:
-            q1_text = f"Which main concept was taught in today's lesson on '{topic}'?"
-        q1_options = [topic, topic2, opt_geo, opt_hist]
-        q1_correct = topic
+            q1_text = f"What was the main topic or concept taught in today's lesson?"
 
-    # Grade specific questions
-    if grade == 1:
+    q1_opts = [topic1, topic2, distractor_pool[0], distractor_pool[1]]
+    random.shuffle(q1_opts)
+
+    # --- Question 2: Lesson detail or key term ---
+    if lang == "hi":
+        q2_text = f"आज के पाठ के अनुसार, '{topic2}' से कौन सी बात सीधे संबंधित है?"
+    elif lang == "sat":
+        q2_text = f"ᱛᱮᱦᱮᱧᱟᱜ ᱯᱟᱴ ᱞᱮᱠᱟᱛᱮ, '{topic2}' ᱥᱟᱶ ᱚᱠᱟ ᱠᱟᱛᱷᱟ ᱡᱚᱲᱟᱣ ᱢᱮᱱᱟᱜᱼᱟ?"
+    elif lang == "bn":
+        q2_text = f"আজকের পাঠ অনুসারে, '{topic2}'-এর সাথে কোন ধারণাটি সম্পর্কিত?"
+    elif lang == "mr":
+        q2_text = f"आजच्या पाठाच्या संदर्भात, '{topic2}' चा मुख्य अर्थ काय आहे?"
+    else:
+        q2_text = f"In today's lesson, which key idea is directly associated with '{topic2}'?"
+
+    q2_opts = [topic2, distractor_pool[2], distractor_pool[3], topic3]
+    random.shuffle(q2_opts)
+
+    # --- Question 3: Vocabulary and comprehension in context ---
+    # Check if numbers were explicitly discussed in the transcript
+    import re
+    nums_in_text = re.findall(r'\b\d+\b', transcript)
+    if nums_in_text and len(nums_in_text) >= 2:
+        n1, n2 = int(nums_in_text[0]), int(nums_in_text[1])
+        ans = str(n1 + n2)
         if lang == "hi":
-            q2_text = f"शब्द '{topic}' में कितने अक्षर/ध्वनियाँ हैं?"
-            q3_text = "गिनें और सही संख्या चुनें: 🌟🌟🌟 = ?"
+            q3_text = f"कक्षा में चर्चा किए गए अंकों ({n1} और {n2}) का योग क्या है?"
         elif lang == "sat":
-            q2_text = f"'{topic}' ᱟᱹᱲᱟᱹ ᱨᱮ ᱛᱤᱱᱟᱹᱜ ᱟᱠᱷᱚᱨ ᱢᱮᱱᱟᱜᱼᱟ?"
-            q3_text = "ᱞᱮᱠᱷᱟᱭ ᱢᱮ ᱟᱨ ᱵᱟᱪᱷᱟᱣ ᱢᱮ: 🌟🌟🌟 = ?"
+            q3_text = f"ᱪᱟᱱᱚᱪ ᱨᱮ ᱞᱟᱹᱭ ᱟᱠᱟᱱ ᱮᱞᱠᱷᱟ ({n1} ᱟᱨ {n2}) ᱡᱚᱲᱟᱣ ᱠᱟᱛᱮ ᱛᱤᱱᱟᱹᱜ ᱦᱩᱭᱩᱜᱼᱟ?"
         else:
-            q2_text = f"How many letters are in the word '{topic}'?"
-            q3_text = "Count and choose: 🌟🌟🌟 = ?"
-
-        q2_options = [str(max(1, len(topic)-1)), str(len(topic)), str(len(topic)+1), str(len(topic)+2)]
-        q2_correct = str(len(topic))
-        q3_options = ["2", "3", "4", "5"]
-        q3_correct = "3"
-
-    elif grade == 2:
-        if lang == "hi":
-            q2_text = f"आज के '{topic}' पाठ में शिक्षक ने कितने मुख्य विचार साझा किए?"
-            q3_text = "गणित समस्या: 6 + 4 का सही उत्तर क्या है?"
-        elif lang == "sat":
-            q2_text = f"ᱛᱮᱦᱮᱧᱟᱜ '{topic}' ᱯᱟᱴ ᱨᱮ ᱛᱤᱱᱟᱹᱜ ᱢᱩᱬᱩᱛ ᱠᱟᱛᱷᱟ ᱞᱟᱹᱭᱮᱱᱟ?"
-            q3_text = "ᱮᱞᱠᱷᱟ ᱠᱩᱠᱞᱤ: ᱖ + ᱔ ᱛᱤᱱᱟᱹᱜ ᱦᱩᱭᱩᱜᱼᱟ?"
-        else:
-            q2_text = f"In today's lesson about '{topic}', how many main ideas were shared?"
-            q3_text = "What is 6 + 4?"
-
-        q2_options = ["1", "2", "3", "4"]
-        q2_correct = "2"
-        q3_options = ["8", "9", "10", "11"]
-        q3_correct = "10"
-
+            q3_text = f"Based on the numbers discussed in class ({n1} and {n2}), what is their sum?"
+        q3_opts = [ans, str(n1 + n2 + 1), str(max(1, n1 + n2 - 1)), str(n1 + n2 + 2)]
+        random.shuffle(q3_opts)
+        q3_correct = ans
     else:
         if lang == "hi":
-            q2_text = f"आज के पाठ से कौन सा शब्द '{topic}' का सबसे अच्छा वर्णन करता है?"
-            q3_text = "गुणन समस्या: 3 × 4 का सही उत्तर क्या है?"
+            q3_text = f"आज सीखे गए पाठ में इनमें से कौन सा महत्वपूर्ण शब्द/विचार आया था?"
         elif lang == "sat":
-            q2_text = f"ᱛᱮᱦᱮᱧᱟᱜ ᱯᱟᱴ ᱠᱷᱚᱱ ᱚᱠᱟ ᱟᱹᱲᱟᱹ '{topic}' ᱨᱮᱱᱟᱜ ᱥᱟᱹᱨᱤ ᱩᱯᱨᱩᱢ ᱠᱟᱱᱟ?"
-            q3_text = "ᱜᱩᱬᱟᱹ ᱠᱩᱠᱞᱤ: ᱓ × ᱔ ᱛᱤᱱᱟᱹᱜ ᱦᱩᱭᱩᱜᱼᱟ?"
+            q3_text = f"ᱛᱮᱦᱮᱧ ᱪᱮᱫ ᱟᱠᱟᱱ ᱯᱟᱴ ᱨᱮ ᱱᱚᱶᱟ ᱠᱚ ᱢᱩᱫᱽ ᱨᱮ ᱚᱠᱟ ᱟᱹᱲᱟᱹ ᱦᱮᱡ ᱞᱮᱱᱟ?"
+        elif lang == "bn":
+            q3_text = f"আজকের ক্লাসে নিচের কোন শব্দটি বিশেষভাবে আলোচিত হয়েছে?"
+        elif lang == "mr":
+            q3_text = f"वर्गादरम्यान खालीलपैकी कोणता महत्त्वाचा घटक शिकवला गेला?"
         else:
-            q2_text = f"Which word best describes '{topic}' from today's lesson?"
-            q3_text = "What is 3 × 4?"
-
-        opt_num = translate_activity_item("Number", lang)
-        opt_shp = translate_activity_item("Shape", lang)
-        q2_options = [topic2, opt_shp, opt_num, topic]
-        q2_correct = topic
-        q3_options = ["10", "12", "14", "16"]
-        q3_correct = "12"
+            q3_text = f"Which of the following concepts was directly explored in today's class?"
+        q3_opts = [topic3, distractor_pool[4], distractor_pool[5], translate_activity_item("General", lang)]
+        random.shuffle(q3_opts)
+        q3_correct = topic3
 
     return {
         "questions": [
             {
                 "id": "q1",
                 "question": q1_text,
-                "options": q1_options,
-                "correct": q1_correct,
+                "options": q1_opts,
+                "correct": topic1,
                 "visual": "LESSON_TOPIC",
-                "topic": topic
+                "topic": topic1
             },
             {
                 "id": "q2",
                 "question": q2_text,
-                "options": q2_options,
-                "correct": q2_correct,
-                "visual": "NUMBER_LINE"
+                "options": q2_opts,
+                "correct": topic2,
+                "visual": "CONCEPT_DETAIL",
+                "topic": topic2
             },
             {
                 "id": "q3",
                 "question": q3_text,
-                "options": q3_options,
+                "options": q3_opts,
                 "correct": q3_correct,
-                "visual": "SHAPES"
+                "visual": "COMPREHENSION"
             }
         ]
     }

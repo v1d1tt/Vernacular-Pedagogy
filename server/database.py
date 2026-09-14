@@ -46,6 +46,11 @@ def init_db():
     except Exception:
         pass  # Column already exists
 
+    # Create indexes for fast lookups
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sessions_join_code ON sessions(join_code)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sessions_teacher ON sessions(teacher_id, teacher_name)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_transcripts_session ON transcripts(session_id)")
+
     # Transcripts log table
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS transcripts (

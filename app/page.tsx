@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { SUPPORTED_LANGUAGES } from "@/lib/nipun-data";
-import { teacherSignup, teacherLogin, registerStudent, getSessionByCode } from "@/lib/api-client";
+import { teacherSignup, teacherLogin, registerStudent, getSessionByCode, detectActiveEdgeServer, getEdgeServerUrl, setEdgeServerUrl } from "@/lib/api-client";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LanguageSwitch } from "@/components/language-switch";
 import { useLanguage } from "@/components/language-provider";
@@ -53,6 +53,28 @@ export default function VaaniSetuOnboarding() {
   const [schoolName, setSchoolName] = useState("");
   const [classCode, setClassCode] = useState("");
 
+  // Edge-server connection (both devices must reach the SAME server)
+  const [serverUrl, setServerUrlState] = useState("");
+  const [serverOnline, setServerOnline] = useState<boolean | null>(null);
+  const [serverChecking, setServerChecking] = useState(false);
+  const [showServerModal, setShowServerModal] = useState(false);
+  const [serverInput, setServerInput] = useState("");
+
+  const runServerDetect = async (force = false) => {
+    setServerChecking(true);
+    try {
+      const url = await detectActiveEdgeServer(force ? { force: true } : undefined);
+      setServerUrlState(url);
+      setServerOnline(true);
+      setServerInput(url);
+    } catch {
+      setServerOnline(false);
+      try { setServerUrlState(getEdgeServerUrl()); } catch {}
+    } finally {
+      setServerChecking(false);
+    }
+  };
+
   useEffect(() => {
     try {
       const saved = localStorage.getItem("vs-app-lang") as LanguageCode | null;
@@ -62,6 +84,7 @@ export default function VaaniSetuOnboarding() {
       const l = localStorage.getItem("user_lang");
       if (r && n) setExistingUser({ role: r, name: n, lang: l || "hi" });
     } catch {}
+    void runServerDetect();
   }, [setLang]);
 
   const handleSelectLanguage = (code: string) => setLang(code as LanguageCode);
@@ -152,13 +175,19 @@ export default function VaaniSetuOnboarding() {
     setIsLoading(true);
     setAuthError("");
     try {
+      await runServerDetect();
       let foundSessionId = "";
       if (classCode.trim()) {
         try {
           const sess = await getSessionByCode(classCode.trim());
           foundSessionId = sess.id;
-        } catch {
-          setAuthError(t("sessionNotFoundError") || "Invalid class code or session not active.");
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : "";
+          setAuthError(
+            msg === "EDGE_SERVER_NOT_FOUND"
+              ? "Edge server unreachable. Join the teacher's Wi-Fi and set the server URL first."
+              : (t("sessionNotFoundError") || "Invalid class code or session not active.")
+          );
           setIsLoading(false);
           return;
         }
@@ -269,6 +298,40 @@ export default function VaaniSetuOnboarding() {
 
       <main className="flex-1 flex items-center justify-center px-4 py-6">
         <div className="w-full max-w-2xl space-y-6">
+
+          {/* Edge-server status — both devices must show Connected to the SAME URL */}
+          <div
+            className={`p-3 rounded-2xl border text-xs font-medium flex flex-wrap items-center justify-between gap-2 ${
+              serverOnline
+                ? "bg-[var(--green-tint)] border-[var(--green-tint)] text-[var(--green)]"
+                : serverOnline === false
+                ? "bg-[var(--red-tint)] border-[var(--red-tint)] text-[var(--red)]"
+                : "bg-[var(--surface)] border-[var(--border)] text-[var(--text-muted)]"
+            }`}
+          >
+            <span className="font-bold">
+              {serverChecking
+                ? "Looking for edge server…"
+                : serverOnline
+                ? `Edge server connected · ${serverUrl}`
+                : `Edge server OFFLINE · ${serverUrl || "not found"} — teacher + student need same Wi-Fi & same URL`}
+            </span>
+            <span className="flex gap-2">
+              <button
+                onClick={() => { setServerInput(serverUrl || "http://192.168.1.191:8000"); setShowServerModal(true); }}
+                className="px-2.5 py-1 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--text-primary)] font-bold"
+              >
+                Set server
+              </button>
+              <button
+                onClick={() => runServerDetect(true)}
+                disabled={serverChecking}
+                className="px-2.5 py-1 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--text-primary)] font-bold disabled:opacity-50"
+              >
+                Retry
+              </button>
+            </span>
+          </div>
 
           {/* Returning user banner */}
           {existingUser && step === 1 && (
@@ -745,6 +808,42 @@ export default function VaaniSetuOnboarding() {
 
         </div>
       </main>
+
+      {showServerModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="vs-surface w-full max-w-md rounded-3xl p-6 border border-[var(--border)] space-y-4">
+            <h3 className="text-base font-extrabold">Edge server URL</h3>
+            <p className="text-xs text-[var(--text-muted)]">
+              Enter the SAME URL on teacher and student devices, e.g. http://192.168.1.5:8000. Both must be on the
+              same Wi-Fi/hotspot and the server must be running.
+            </p>
+            <input
+              type="text"
+              value={serverInput}
+              onChange={(e) => setServerInput(e.target.value)}
+              placeholder="http://192.168.1.5:8000"
+              className="vs-input w-full px-4 py-3 rounded-xl font-mono text-sm"
+            />
+            <div className="flex gap-2">
+              <button onClick={() => setShowServerModal(false)} className="flex-1 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-bold">
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    setEdgeServerUrl(serverInput);
+                    setShowServerModal(false);
+                    await runServerDetect(true);
+                  } catch {}
+                }}
+                className="flex-1 vs-btn-brand py-2.5 rounded-xl text-xs font-extrabold"
+              >
+                Save & Connect
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <footer className="text-center py-4 text-[11px] text-[var(--text-muted)] font-medium">
         {t("footerText")}

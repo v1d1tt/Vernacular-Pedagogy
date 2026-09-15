@@ -44,9 +44,11 @@ import {
   RotateCcw,
   Flame,
   QrCode,
+
 } from "lucide-react";
-import { MicWaveform } from "@/components/mic-waveform";
 import { Mascot } from "@/components/mascot";
+
+
 import { prepareTtsText, getBestVoiceForLang, hasOlChiki, olChikiToRoman } from "@/lib/ol-chiki";
 import {
   FLN_STRINGS,

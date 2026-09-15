@@ -292,7 +292,7 @@ export default function VaaniSetuOnboarding() {
             व
           </div>
           <span className="font-extrabold vs-text text-lg tracking-tight">{t("appName")}</span>
-          <div className="ml-2 hidden sm:block">
+          <div className="ml-2 block">
             <Mascot src="/animations/owlhianimation.lottie" width={40} height={40} />
           </div>
         </div>
@@ -404,8 +404,8 @@ export default function VaaniSetuOnboarding() {
                   </h2>
                   <p className="text-xs text-[var(--text-muted)] mt-1">{t("selectLanguageSub")}</p>
                 </div>
-                <div className="hidden sm:block shrink-0">
-                  <Mascot src="/animations/education.lottie" width={140} height={140} />
+                <div className="block shrink-0">
+                  <Mascot src="/animations/education.lottie" width={100} height={100} />
                 </div>
               </div>
 
@@ -480,8 +480,8 @@ export default function VaaniSetuOnboarding() {
                   <h2 className="text-2xl font-extrabold text-[var(--text-primary)] tracking-tight">{t("chooseRoleTitle")}</h2>
                   <p className="text-xs text-[var(--text-muted)] mt-1">{t("chooseRoleSub")}</p>
                 </div>
-                <div className="hidden sm:block shrink-0 -mt-2">
-                  <Mascot src="/animations/owlsanimation.lottie" width={80} height={80} />
+                <div className="block shrink-0 -mt-2">
+                  <Mascot src="/animations/owlsanimation.lottie" width={70} height={70} />
                 </div>
               </div>
 

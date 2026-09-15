@@ -1034,39 +1034,10 @@ export default function TeacherConsole() {
                       </div>
                       <span className="text-[10px] text-[var(--text-muted)] font-mono">{tItem.ttfa_seconds}s</span>
                     </div>
-                    <div className="px-4 py-3 space-y-2">
+                    <div className="px-4 py-3">
                       <p className="text-sm font-bold text-[var(--text-primary)] leading-relaxed">
                         &ldquo;{tItem.original_text}&rdquo;
                       </p>
-                      {Object.keys(tItem.translations || {}).length > 0 && (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                          {Object.entries(tItem.translations || {})
-                            .filter(([trLang]) => ["hi", "sat", "en", "bn", "mr", "ta", "te"].includes(trLang) && trLang !== (tItem.source_lang || teachingLang))
-                            .map(([trLang, text]) => {
-                              const pillMap: Record<string, string> = {
-                                hi: t("langPillHi"),
-                                sat: t("langPillSat"),
-                                en: t("langPillEn"),
-                                bn: t("langPillBn"),
-                                mr: t("langPillMr"),
-                                ta: t("langPillTa"),
-                                te: t("langPillTe"),
-                              };
-                              const label = pillMap[trLang] || trLang.toUpperCase();
-                              return (
-                                <div
-                                  key={trLang}
-                                  className="p-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs flex items-baseline gap-2 shadow-2xs"
-                                >
-                                  <span className="font-bold text-[var(--brand-deep)] text-[11px] shrink-0 px-2 py-0.5 rounded-md bg-[var(--brand-tint)] border border-[var(--brand-tint2)]">
-                                    {label}
-                                  </span>
-                                  <span className="text-[var(--text-primary)] font-medium leading-normal">{text}</span>
-                                </div>
-                              );
-                            })}
-                        </div>
-                      )}
                     </div>
                   </div>
                 ))

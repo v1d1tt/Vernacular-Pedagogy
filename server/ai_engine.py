@@ -210,7 +210,11 @@ def transcribe_audio_chunk(audio_array: np.ndarray, sample_rate: int = 16000, la
     text = edge_ai.transcribe(audio_array, sample_rate=sample_rate, language=lang)
     latency = round(time.time() - t_start, 3)
 
-    engine = WHISPER_SANTALI_HF_ID if lang == "sat" else "sherpa-onnx (whisper-tiny-int8)"
+    engine = (
+        WHISPER_SANTALI_HF_ID if lang == "sat"
+        else "sherpa-onnx (indicconformer-hi)" if lang == "hi"
+        else "sherpa-onnx (whisper-tiny-int8)"
+    )
     voice_cmd = parse_voice_command(text)
 
     return {

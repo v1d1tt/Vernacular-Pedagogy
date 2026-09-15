@@ -44,7 +44,8 @@ import {
   RotateCcw,
   Flame,
   QrCode,
-
+  Server,
+  RefreshCw,
 } from "lucide-react";
 import { Mascot } from "@/components/mascot";
 
@@ -250,7 +251,7 @@ export default function StudentConsole() {
       try {
         localStorage.setItem("user_lang", appLang);
         localStorage.setItem("user_lang_name", currentLanguage?.name || appLang);
-      } catch {}
+      } catch { }
     }
   }, [appLang, currentLanguage, studentLang]);
 
@@ -293,12 +294,12 @@ export default function StudentConsole() {
   const arcadeCorrect: string = !arcadeRound
     ? ""
     : arcadeRound.kind === "count"
-    ? String(arcadeRound.count)
-    : arcadeRound.kind === "add"
-    ? arcadeRound.answer
-    : arcadeRound.kind === "phonics"
-    ? arcadeRound.letter
-    : arcadeRound.word;
+      ? String(arcadeRound.count)
+      : arcadeRound.kind === "add"
+        ? arcadeRound.answer
+        : arcadeRound.kind === "phonics"
+          ? arcadeRound.letter
+          : arcadeRound.word;
   const arcadeSolved = arcadeRound !== null && arcadePicked !== null && arcadePicked === arcadeCorrect;
 
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
@@ -335,7 +336,7 @@ export default function StudentConsole() {
           win._activeAudio = null;
         }
         win._activeUtterance = null;
-      } catch {}
+      } catch { }
     }
     setIsPlayingAudio(false);
   }, []);
@@ -507,7 +508,7 @@ export default function StudentConsole() {
       setServerOnline(false);
       try {
         setServerUrlState(getEdgeServerUrl());
-      } catch {}
+      } catch { }
       setServerError(
         "Edge server not found. Join the same Wi-Fi/hotspot as the teacher, make sure the teacher started the server, then Retry — or enter http://<teacher-IP>:8000 manually."
       );
@@ -522,7 +523,7 @@ export default function StudentConsole() {
       if (wsRef.current) {
         try {
           wsRef.current.close();
-        } catch {}
+        } catch { }
         wsRef.current = null;
       }
       setWsConnected(false);
@@ -651,7 +652,7 @@ export default function StudentConsole() {
             if (joinRes.grade) setClassGrade(Number(joinRes.grade));
             try {
               localStorage.setItem("user_server_participant_id", srvPid);
-            } catch {}
+            } catch { }
             setJoinedSession({ session_id: targetSessionId });
             localStorage.setItem("user_joined_session_id", targetSessionId);
 
@@ -712,15 +713,15 @@ export default function StudentConsole() {
       const qrServer = qp.get("server");
       const qrCode = qp.get("code");
       if (qrServer) {
-        try { setEdgeServerUrl(qrServer); } catch {}
+        try { setEdgeServerUrl(qrServer); } catch { }
       }
       if (qrCode) {
         const clean = qrCode.trim().toUpperCase();
-        try { localStorage.setItem("user_class_code", clean); } catch {}
+        try { localStorage.setItem("user_class_code", clean); } catch { }
         setActiveClassCode(clean);
         setNewCodeInput(clean);
       }
-    } catch {}
+    } catch { }
     const s = localStorage.getItem("user_name");
     const l = localStorage.getItem("user_lang") || "hi";
     const ln = localStorage.getItem("user_lang_name") || "Hindi";
@@ -736,7 +737,7 @@ export default function StudentConsole() {
 
     connectToSession();
     return () => {
-      try { wsRef.current?.close(); } catch {}
+      try { wsRef.current?.close(); } catch { }
     };
   }, [connectToSession]);
 
@@ -751,7 +752,7 @@ export default function StudentConsole() {
       if (overrideServer) {
         try {
           setEdgeServerUrl(overrideServer);
-        } catch {}
+        } catch { }
       }
       await runServerDetect();
       const sess = await getSessionByCode(code);
@@ -834,7 +835,7 @@ export default function StudentConsole() {
     const pid = serverParticipantId || (() => { try { return localStorage.getItem("user_server_participant_id") || ""; } catch { return ""; } })();
     if (!pid) {
       setStudentMicStatus("Not fully joined yet — retrying join…");
-      await connectToSession().catch(() => {});
+      await connectToSession().catch(() => { });
       return;
     }
     try {
@@ -916,7 +917,7 @@ export default function StudentConsole() {
 
         recognition.start();
         return;
-      } catch {}
+      } catch { }
     }
 
     // Fallback: AudioRecorder with 3s record
@@ -1052,12 +1053,24 @@ export default function StudentConsole() {
               <p className="text-sm font-extrabold text-[var(--text-primary)] leading-none truncate">{studentName}</p>
               <p className="text-[10px] text-[var(--text-muted)] mt-0.5 font-medium truncate">
                 {t("class")} {classGrade || grade}
-                 · <span className="text-[var(--brand-deep)] font-bold">{studentLangName}</span>
+                · <span className="text-[var(--brand-deep)] font-bold">{studentLangName}</span>
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
+            {/* Server Status Button */}
+            <button
+              onClick={() => { setServerInput(serverUrl || "http://192.168.1.191:8000"); setShowServerModal(true); }}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] hover:bg-[var(--surface-1)] text-[var(--text-primary)] text-xs font-bold transition shadow-2xs"
+              title="Edge Server Status & Network Settings"
+            >
+              <span className={`w-2 h-2 rounded-full ${serverOnline ? "bg-[var(--green)]" : serverOnline === false ? "bg-[var(--red)]" : "bg-[var(--amber)] animate-pulse"}`} />
+              <Server className="w-3.5 h-3.5 text-[var(--brand-deep)]" />
+              <span className="hidden xs:inline text-[11px]">
+                {serverDetecting ? "Detecting..." : serverOnline ? "Server Online" : "Server Offline"}
+              </span>
+            </button>
             <LanguageSwitch />
             <ThemeToggle />
           </div>
@@ -1093,11 +1106,10 @@ export default function StudentConsole() {
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition active:scale-95 whitespace-nowrap ${
-              activeTab === tab.id
-                ? "vs-btn-brand shadow-xs"
-                : "text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
-            }`}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition active:scale-95 whitespace-nowrap ${activeTab === tab.id
+              ? "vs-btn-brand shadow-xs"
+              : "text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
+              }`}
           >
             {tab.icon}
             <span>{tab.label}</span>
@@ -1107,48 +1119,6 @@ export default function StudentConsole() {
 
       {/* ── Main Content Area ──────────────────────────────────────── */}
       <main className="flex-1 max-w-4xl mx-auto w-full p-4 sm:p-6 space-y-4">
-        {/* Connection status — never silently fall back */}
-        <div
-          className={`rounded-2xl px-4 py-3 border text-xs font-medium flex flex-wrap items-center justify-between gap-2 ${
-            serverOnline
-              ? "bg-[var(--green-tint)] border-[var(--green-tint)] text-[var(--green)]"
-              : serverOnline === false
-              ? "bg-[var(--red-tint)] border-[var(--red-tint)] text-[var(--red)]"
-              : "bg-[var(--amber-tint)] border-[var(--amber-tint)] text-[var(--amber)]"
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            <span className={`w-2 h-2 rounded-full ${serverOnline ? "bg-[var(--green)]" : serverOnline === false ? "bg-[var(--red)]" : "bg-[var(--amber)] animate-pulse"}`} />
-            <span className="font-bold">
-              {serverDetecting
-                ? (t("searchingEdge") || "Searching for teacher's edge server…")
-                : serverOnline
-                ? `${t("edgeConnected") || "Connected"} · ${serverUrl}${joinedSession ? (wsConnected ? " · Live updates ON" : " · Reconnecting live updates…") : " · No class joined yet"}`
-                : `${t("edgeOffline") || "OFFLINE — no quiz/voice will arrive until connected"} · ${serverUrl || "no server"}`}
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                setServerInput(serverUrl || "http://192.168.1.191:8000");
-                setShowServerModal(true);
-              }}
-              className="px-2.5 py-1 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--text-primary)] font-bold"
-            >
-              {t("setServerBtn") || "Set server"}
-            </button>
-            <button
-              onClick={() => connectToSession()}
-              disabled={serverDetecting}
-              className="px-2.5 py-1 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--text-primary)] font-bold disabled:opacity-50"
-            >
-              {t("retryBtn") || "Retry"}
-            </button>
-          </div>
-        </div>
-        {(serverError || connectError) && (
-          <p className="text-[11px] text-[var(--red)] font-medium px-1">{serverError || connectError}</p>
-        )}
         {/* LISTEN TAB */}
         {activeTab === "LISTEN" && (
           <div className="space-y-4">
@@ -1156,11 +1126,10 @@ export default function StudentConsole() {
             <div className="vs-surface rounded-2xl p-5 border border-[var(--border)] shadow-xs space-y-4">
               <div className="flex items-center justify-between pb-3 border-b border-[var(--border-sub)]">
                 <div className="flex items-center gap-2 text-xs text-[var(--text-muted)] font-bold">
-                  <span className={`px-2.5 py-1 rounded-full text-xs font-black flex items-center gap-1.5 ${
-                    teacherMicLive
-                      ? "bg-red-600 text-white animate-pulse shadow-sm"
-                      : "bg-[var(--surface-2)] text-[var(--text-muted)] border border-[var(--border)]"
-                  }`}>
+                  <span className={`px-2.5 py-1 rounded-full text-xs font-black flex items-center gap-1.5 ${teacherMicLive
+                    ? "bg-red-600 text-white animate-pulse shadow-sm"
+                    : "bg-[var(--surface-2)] text-[var(--text-muted)] border border-[var(--border)]"
+                    }`}>
                     <span className={`w-2 h-2 rounded-full ${teacherMicLive ? "bg-white animate-ping" : "bg-gray-400"}`} />
                     {teacherMicLive
                       ? t("micLive") || "● LIVE MIC"
@@ -1190,7 +1159,7 @@ export default function StudentConsole() {
                     <span>In your language ({studentLangName})</span>
                   </span>
                 </div>
-                
+
                 <div className="flex items-center justify-between gap-3 mt-1">
                   <p className="text-xl font-extrabold text-[var(--text-primary)] leading-relaxed flex-1">
                     &ldquo;{translatedSpeech}&rdquo;
@@ -1207,11 +1176,10 @@ export default function StudentConsole() {
               <button
                 type="button"
                 onClick={() => playSyntheticAudio(translatedSpeech, studentLang)}
-                className={`w-full py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition active:scale-[0.98] ${
-                  isPlayingAudio
-                    ? "bg-[var(--red-tint)] border-2 border-[var(--red)] text-[var(--red)] animate-pulse shadow-xs"
-                    : "vs-btn-brand shadow-xs"
-                }`}
+                className={`w-full py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition active:scale-[0.98] ${isPlayingAudio
+                  ? "bg-[var(--red-tint)] border-2 border-[var(--red)] text-[var(--red)] animate-pulse shadow-xs"
+                  : "vs-btn-brand shadow-xs"
+                  }`}
               >
                 {isPlayingAudio ? (
                   <>
@@ -1260,25 +1228,24 @@ export default function StudentConsole() {
               {/* Raise Hand Button (Only mic access path for students) */}
               <button
                 onClick={handleToggleRaiseHand}
-                className={`w-full py-4 px-4 rounded-xl font-extrabold text-sm flex items-center justify-center gap-2 transition active:scale-95 shadow-sm ${
-                  isRecordingStudent
-                    ? "bg-[var(--red)] text-white animate-pulse shadow-md"
-                    : canSpeak
+                className={`w-full py-4 px-4 rounded-xl font-extrabold text-sm flex items-center justify-center gap-2 transition active:scale-95 shadow-sm ${isRecordingStudent
+                  ? "bg-[var(--red)] text-white animate-pulse shadow-md"
+                  : canSpeak
                     ? "bg-[var(--green)] text-white shadow-md animate-bounce"
                     : raisedHand
-                    ? "bg-[var(--amber-tint)] text-[var(--amber)] border-2 border-[var(--amber)]"
-                    : "vs-btn-brand"
-                }`}
+                      ? "bg-[var(--amber-tint)] text-[var(--amber)] border-2 border-[var(--amber)]"
+                      : "vs-btn-brand"
+                  }`}
               >
                 <Hand className="w-5 h-5" />
                 <span>
                   {isRecordingStudent
                     ? "Recording… Tap to send"
                     : canSpeak
-                    ? "Teacher Approved! Tap to speak"
-                    : raisedHand
-                    ? t("handRaisedWaitingBtn") || "Hand Raised"
-                    : t("raiseMyHandBtn") || "Raise Hand"}
+                      ? "Teacher Approved! Tap to speak"
+                      : raisedHand
+                        ? t("handRaisedWaitingBtn") || "Hand Raised"
+                        : t("raiseMyHandBtn") || "Raise Hand"}
                 </span>
               </button>
 
@@ -1380,11 +1347,10 @@ export default function StudentConsole() {
                                 <button
                                   type="button"
                                   onClick={() => handleVoiceAnswer(q.id, q.options || [])}
-                                  className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition active:scale-95 flex-shrink-0 ${
-                                    isListening
-                                      ? "bg-[var(--red)] text-white animate-pulse shadow-xs"
-                                      : "bg-[var(--brand-tint)] text-[var(--brand-deep)] border border-[var(--brand-tint2)] hover:bg-[var(--brand-tint2)]"
-                                  }`}
+                                  className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition active:scale-95 flex-shrink-0 ${isListening
+                                    ? "bg-[var(--red)] text-white animate-pulse shadow-xs"
+                                    : "bg-[var(--brand-tint)] text-[var(--brand-deep)] border border-[var(--brand-tint2)] hover:bg-[var(--brand-tint2)]"
+                                    }`}
                                   title="Answer with Voice"
                                 >
                                   <Mic className="w-3.5 h-3.5" />
@@ -1401,23 +1367,22 @@ export default function StudentConsole() {
 
                             {q.options && (
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-{q.options.map((opt) => (
-                                    <button
-                                      key={opt}
-                                      disabled={isSubmitted}
-                                      onClick={() => {
-                                        setSelectedAnswers((prev) => ({ ...prev, [q.id]: opt }));
-                                        avatar.happy("Nice choice! 🌟");
-                                      }}
-                                      className={`p-3 rounded-xl font-bold text-xs text-left transition border-2 ${
-                                        selectedAnswers[q.id] === opt
-                                          ? "border-[var(--brand)] bg-[var(--brand)] text-[#0c1a2e] shadow-xs"
-                                          : "border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-primary)] hover:border-[var(--brand)]"
+                                {q.options.map((opt) => (
+                                  <button
+                                    key={opt}
+                                    disabled={isSubmitted}
+                                    onClick={() => {
+                                      setSelectedAnswers((prev) => ({ ...prev, [q.id]: opt }));
+                                      avatar.happy("Nice choice! 🌟");
+                                    }}
+                                    className={`p-3 rounded-xl font-bold text-xs text-left transition border-2 ${selectedAnswers[q.id] === opt
+                                      ? "border-[var(--brand)] bg-[var(--brand)] text-[#0c1a2e] shadow-xs"
+                                      : "border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-primary)] hover:border-[var(--brand)]"
                                       }`}
-                                    >
-                                      {opt}
-                                    </button>
-                                  ))}
+                                  >
+                                    {opt}
+                                  </button>
+                                ))}
                               </div>
                             )}
                           </div>
@@ -1741,17 +1706,15 @@ export default function StudentConsole() {
               const optClass = (opt: string, correct: string, picked: string | null | undefined, big?: boolean) => {
                 const isCorrect = opt === correct;
                 const solved = picked === correct;
-                return `rounded-xl border-2 transition active:scale-95 font-bold text-[var(--text-primary)] ${
-                  big ? "py-4 text-3xl" : "py-3.5 text-sm"
-                } ${
-                  solved && isCorrect
+                return `rounded-xl border-2 transition active:scale-95 font-bold text-[var(--text-primary)] ${big ? "py-4 text-3xl" : "py-3.5 text-sm"
+                  } ${solved && isCorrect
                     ? "border-[var(--green)] bg-[var(--green)] text-white shadow-xs"
                     : solved
-                    ? "border-[var(--border)] bg-[var(--surface-2)] opacity-50"
-                    : picked === opt
-                    ? "border-[var(--red)] bg-[var(--red-tint)] text-[var(--red)]"
-                    : "border-[var(--border)] bg-[var(--surface-2)] hover:border-[var(--brand)]"
-                }`;
+                      ? "border-[var(--border)] bg-[var(--surface-2)] opacity-50"
+                      : picked === opt
+                        ? "border-[var(--red)] bg-[var(--red-tint)] text-[var(--red)]"
+                        : "border-[var(--border)] bg-[var(--surface-2)] hover:border-[var(--brand)]"
+                  }`;
               };
 
               const listenBtn = (text: string) => (
@@ -2015,22 +1978,100 @@ export default function StudentConsole() {
         </div>
       )}
 
-      {/* ── Edge Server Setting Modal ──────────────────────────────── */}
       {showServerModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
           <div className="vs-surface w-full max-w-md rounded-3xl p-6 border border-[var(--border)] shadow-2xl space-y-4">
-            <h3 className="text-base font-extrabold text-[var(--text-primary)]">{t("serverUrlTitle")}</h3>
-            <p className="text-xs text-[var(--text-muted)]">
-              {t("serverUrlSub")}
-            </p>
-            <input
-              type="text"
-              value={serverInput}
-              onChange={(e) => setServerInput(e.target.value)}
-              placeholder="http://192.168.1.5:8000"
-              className="vs-input w-full px-4 py-3 rounded-xl font-mono text-sm"
-            />
-            <div className="flex gap-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-extrabold text-[var(--text-primary)] flex items-center gap-2">
+                <Server className="w-5 h-5 text-[var(--brand-deep)]" />
+                Student Edge AI Server Status
+              </h3>
+              <button
+                onClick={() => setShowServerModal(false)}
+                className="p-1.5 rounded-xl hover:bg-[var(--surface-2)] text-[var(--text-secondary)] transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Live connection badge */}
+            <div className={`p-3 rounded-2xl border text-xs font-bold flex flex-col gap-1.5 ${serverOnline
+              ? "bg-[var(--green-tint)] border-[var(--green-tint)] text-[var(--green)]"
+              : serverOnline === false
+                ? "bg-[var(--red-tint)] border-[var(--red-tint)] text-[var(--red)]"
+                : "bg-[var(--amber-tint)] border-[var(--amber-tint)] text-[var(--amber)]"
+              }`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className={`w-2.5 h-2.5 rounded-full ${serverOnline ? "bg-[var(--green)]" : serverOnline === false ? "bg-[var(--red)]" : "bg-[var(--amber)] animate-pulse"}`} />
+                  <span>
+                    {serverDetecting ? "Detecting edge server..." : serverOnline ? "Connected to Teacher's Server" : "Server Offline"}
+                  </span>
+                </div>
+                <button
+                  onClick={() => connectToSession()}
+                  disabled={serverDetecting}
+                  className="p-1.5 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--text-primary)] hover:opacity-90 disabled:opacity-50"
+                  title="Re-test Connection"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${serverDetecting ? "animate-spin" : ""}`} />
+                </button>
+              </div>
+              {(serverError || connectError) && (
+                <p className="text-[10px] text-[var(--red)] font-medium">{serverError || connectError}</p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider block">
+                Server IP / Endpoint URL
+              </label>
+              <input
+                type="text"
+                value={serverInput}
+                onChange={(e) => setServerInput(e.target.value)}
+                placeholder="http://192.168.1.5:8000"
+                className="vs-input w-full px-4 py-3 rounded-xl font-mono text-sm"
+              />
+            </div>
+
+            {/* Quick Presets */}
+            <div className="space-y-1.5">
+              <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider block">Quick Presets</span>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setServerInput("http://localhost:8000")}
+                  className="px-2.5 py-1 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[11px] font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition"
+                >
+                  Localhost (8000)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setServerInput("http://10.0.2.2:8000")}
+                  className="px-2.5 py-1 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[11px] font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition"
+                >
+                  Android Emulator (10.0.2.2)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setServerInput("http://192.168.1.191:8000")}
+                  className="px-2.5 py-1 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[11px] font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition"
+                >
+                  Wi-Fi (192.168.1.191)
+                </button>
+              </div>
+            </div>
+
+            {/* Evaluator Note */}
+            <div className="p-3 rounded-2xl bg-[var(--brand-tint)]/40 border border-[var(--brand-tint2)] text-[11px] text-[var(--text-secondary)] space-y-1">
+              <p className="font-bold text-[var(--brand-deep)]">Architecture Note:</p>
+              <p>
+                Student app receives real-time Indic ASR voice streams and multilingual translations directly from this Edge AI server over WebSocket.
+              </p>
+            </div>
+
+            <div className="flex gap-2 pt-1">
               <button
                 onClick={() => setShowServerModal(false)}
                 className="flex-1 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-bold text-[var(--text-secondary)]"

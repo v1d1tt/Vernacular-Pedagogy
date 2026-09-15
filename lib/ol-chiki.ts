@@ -136,13 +136,29 @@ export function olChikiToRoman(text: string): string {
  * Prepares any text for reliable speech synthesis.
  * If text contains Ol Chiki script, transliterates it to Devanagari so
  * Hindi/Indian TTS voices can articulate the Santali words phonetically.
+ * Falls back to Roman phonetics when Devanagari would be empty or when
+ * the caller detects that no hi-IN voice is available on the device.
  */
-export function prepareTtsText(text: string, lang: string): { speechText: string; speechLang: string } {
+export function prepareTtsText(text: string, lang: string): { speechText: string; speechLang: string; altText?: string; altLang?: string } {
   if (lang === "sat" || hasOlChiki(text)) {
     const devText = olChikiToDevanagari(text);
+    const roman = olChikiToRoman(text);
+    const hasDev = devText.trim().length >= 2;
+    // Primary: Devanagari + hi-IN (Piper / native Hindi voice)
+    // Alternate: Roman + en-IN (guaranteed to exist on every device)
+    if (hasDev) {
+      return {
+        speechText: devText.trim(),
+        speechLang: "hi-IN",
+        altText: roman.trim() || devText.trim(),
+        altLang: "en-IN",
+      };
+    }
     return {
-      speechText: devText.trim() || olChikiToRoman(text),
-      speechLang: "hi-IN",
+      speechText: roman.trim() || text,
+      speechLang: "en-IN",
+      altText: devText.trim() || roman.trim(),
+      altLang: "hi-IN",
     };
   }
 
@@ -160,4 +176,25 @@ export function prepareTtsText(text: string, lang: string): { speechText: string
     speechText: text,
     speechLang: langCodeMap[lang] || "hi-IN",
   };
+}
+
+export function getBestVoiceForLang(voices: SpeechSynthesisVoice[], targetLang: string): SpeechSynthesisVoice | undefined {
+  if (!voices || voices.length === 0) return undefined;
+  const norm = (s: string) => (s || "").toLowerCase().replace("_", "-");
+  const target = norm(targetLang);
+  const prefix = target.split("-")[0];
+  // 1. exact match e.g. hi-IN == hi-IN
+  const exact = voices.find((v) => norm(v.lang) === target);
+  if (exact) return exact;
+  // 2. prefix match e.g. hi-IN matches hi
+  const pref = voices.find((v) => norm(v.lang).startsWith(prefix));
+  if (pref) return pref;
+  // 3. any Indian voice for Santali / Hindi fallback chain
+  if (prefix === "hi" || targetLang === "sat") {
+    const indian = voices.find((v) => norm(v.lang).includes("-in") || norm(v.lang).includes("in"));
+    if (indian) return indian;
+    const hindiName = voices.find((v) => (v.name || "").toLowerCase().includes("hindi"));
+    if (hindiName) return hindiName;
+  }
+  return voices[0];
 }

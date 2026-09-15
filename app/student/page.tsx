@@ -21,6 +21,8 @@ import { AudioRecorder } from "@/lib/audio-recorder";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LanguageSwitch } from "@/components/language-switch";
 import { useLanguage } from "@/components/language-provider";
+import { AvatarGuide, useAvatarGuide } from "@/components/ui/avatar-guide";
+import { QrScanner, parseJoinQr } from "@/components/qr-scanner";
 import {
   Volume2,
   Hand,
@@ -35,9 +37,30 @@ import {
   Sparkles,
   Key,
   X,
+  Hash,
+  Type,
+  Shapes,
+  Plus,
+  RotateCcw,
+  Flame,
+  QrCode,
 } from "lucide-react";
 import { MicWaveform } from "@/components/mic-waveform";
-import { prepareTtsText } from "@/lib/ol-chiki";
+import { prepareTtsText, getBestVoiceForLang, hasOlChiki, olChikiToRoman } from "@/lib/ol-chiki";
+import {
+  FLN_STRINGS,
+  DEFAULT_GREETINGS,
+  normalizeFlnLang,
+  genCountRound,
+  genPhonicsRound,
+  genMatchRound,
+  genAddRound,
+  pickPraise,
+  pickEncourage,
+  isServerGameList,
+  type ServerGame,
+  type ArcadeRound,
+} from "@/lib/fln-games";
 
 export interface StudentActivity {
   activity_id: string;
@@ -64,6 +87,7 @@ export interface StudentActivity {
       task: string;
       answer?: string;
     }>;
+    games?: ServerGame[];
   };
 }
 
@@ -150,7 +174,7 @@ const getVoicesAsync = (): Promise<SpeechSynthesisVoice[]> => {
 
 export default function StudentConsole() {
   const router = useRouter();
-  const { t } = useLanguage();
+  const { t, lang: appLang, currentLanguage } = useLanguage();
   const [studentName, setStudentName] = useState("Aarav");
   const [studentLang, setStudentLang] = useState("hi");
   const [studentLangName, setStudentLangName] = useState("Hindi");
@@ -173,10 +197,20 @@ export default function StudentConsole() {
   const [showCodeModal, setShowCodeModal] = useState(false);
   const [newCodeInput, setNewCodeInput] = useState("");
   const [codeError, setCodeError] = useState("");
+  const [showScanner, setShowScanner] = useState(false);
   const [teacherMicLive, setTeacherMicLive] = useState(false);
   const [activeTab, setActiveTab] = useState<"LISTEN" | "QUIZ" | "WORKSHEET" | "FLASHCARDS" | "GAMES">("LISTEN");
   const [gameScore, setGameScore] = useState<number>(0);
-  const [activeGameIndex, setActiveGameIndex] = useState<number>(0);
+  // Arcade: teacher games render from activities; built-in arcade below is the offline fallback
+  const [arcadeGame, setArcadeGame] = useState<"count" | "phonics" | "match" | "add" | null>(null);
+  const [arcadeRound, setArcadeRound] = useState<ArcadeRound | null>(null);
+  const [arcadeRoundKey, setArcadeRoundKey] = useState(0);
+  const [arcadePicked, setArcadePicked] = useState<string | null>(null);
+  const [arcadeStreak, setArcadeStreak] = useState(0);
+  const [serverPicked, setServerPicked] = useState<Record<string, string>>({});
+
+  // Avatar guide for quizzes, flashcards, worksheets
+  const avatar = useAvatarGuide();
 
   // Teacher speech in teacher's language
   const [teacherSpeech, setTeacherSpeech] = useState(
@@ -190,6 +224,10 @@ export default function StudentConsole() {
   );
   const studentLangRef = useRef(studentLang);
   const joinedSessionRef = useRef(joinedSession);
+  // True once a real broadcast arrives — until then the card shows a
+  // localized greeting so "replay" never speaks stale Hindi to an
+  // English (or other-language) student.
+  const hasLiveSpeechRef = useRef(false);
 
   useEffect(() => {
     studentLangRef.current = studentLang;
@@ -198,6 +236,66 @@ export default function StudentConsole() {
   useEffect(() => {
     joinedSessionRef.current = joinedSession;
   }, [joinedSession]);
+
+  // Sync with global LanguageProvider — fixes "language change not reflected in Flashcards/Quiz/Listen"
+  useEffect(() => {
+    if (appLang && appLang !== studentLang) {
+      setStudentLang(appLang);
+      const name = currentLanguage?.nativeName || appLang;
+      setStudentLangName(name);
+      try {
+        localStorage.setItem("user_lang", appLang);
+        localStorage.setItem("user_lang_name", currentLanguage?.name || appLang);
+      } catch {}
+    }
+  }, [appLang, currentLanguage, studentLang]);
+
+  // Keep the pre-broadcast greeting in the student's language.
+  useEffect(() => {
+    if (!hasLiveSpeechRef.current) {
+      setTranslatedSpeech(DEFAULT_GREETINGS[normalizeFlnLang(studentLang)]);
+    }
+  }, [studentLang]);
+
+  // Also listen to vs-lang-change custom event for same-tab immediate sync
+  useEffect(() => {
+    const onLangEvt = (e: Event) => {
+      const detail = (e as CustomEvent).detail as string | undefined;
+      if (detail && detail !== studentLangRef.current) {
+        setStudentLang(detail);
+      }
+    };
+    window.addEventListener("vs-lang-change", onLangEvt as EventListener);
+    return () => window.removeEventListener("vs-lang-change", onLangEvt as EventListener);
+  }, []);
+
+  // ── Arcade round lifecycle ──────────────────────────────────────
+  // New randomized round whenever the game, language, or grade changes,
+  // or when the student asks for a new round. Language change therefore
+  // re-renders the SAME game in the new language instead of going stale.
+  useEffect(() => {
+    if (!arcadeGame) {
+      setArcadeRound(null);
+      return;
+    }
+    const lang = normalizeFlnLang(studentLang);
+    if (arcadeGame === "count") setArcadeRound(genCountRound(lang, grade));
+    else if (arcadeGame === "phonics") setArcadeRound(genPhonicsRound(lang));
+    else if (arcadeGame === "match") setArcadeRound(genMatchRound(lang));
+    else setArcadeRound(genAddRound(grade));
+    setArcadePicked(null);
+  }, [arcadeGame, arcadeRoundKey, studentLang, grade]);
+
+  const arcadeCorrect: string = !arcadeRound
+    ? ""
+    : arcadeRound.kind === "count"
+    ? String(arcadeRound.count)
+    : arcadeRound.kind === "add"
+    ? arcadeRound.answer
+    : arcadeRound.kind === "phonics"
+    ? arcadeRound.letter
+    : arcadeRound.word;
+  const arcadeSolved = arcadeRound !== null && arcadePicked !== null && arcadePicked === arcadeCorrect;
 
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [ttfa, setTtfa] = useState<number | null>(null);
@@ -248,8 +346,10 @@ export default function StudentConsole() {
       return;
     }
 
-    // 1. Prepare phonetic text (translates Ol Chiki Santali script into Hindi/Devanagari phonetics)
-    const { speechText, speechLang } = prepareTtsText(rawText, targetLang);
+    // 1. Prepare phonetic text (Santali Ol Chiki -> Devanagari / Roman with hi-IN -> en-IN fallback)
+    const prep = prepareTtsText(rawText, targetLang);
+    let speechText = prep.speechText;
+    let speechLang = prep.speechLang;
 
     setIsPlayingAudio(true);
 
@@ -263,23 +363,31 @@ export default function StudentConsole() {
           window.speechSynthesis.resume();
         }
 
+        // If raw text still has Ol Chiki but prep returned empty, force Roman fallback
+        if (hasOlChiki(rawText) && (!speechText || hasOlChiki(speechText))) {
+          const romanFallback = olChikiToRoman(rawText);
+          if (romanFallback && romanFallback.trim()) {
+            speechText = romanFallback;
+            speechLang = "en-IN";
+          }
+        }
+
+        // Detect available voices before deciding which phonetics to use
+        const voices = await getVoicesAsync();
+        let chosenVoice = getBestVoiceForLang(voices, speechLang);
+
+        // If we wanted hi-IN but no hi voice exists, automatically fall back to Roman + en-IN
+        const hasHiVoice = voices.some((v) => (v.lang || "").toLowerCase().replace("_", "-").startsWith("hi"));
+        if ((targetLang === "sat" || hasOlChiki(rawText)) && speechLang === "hi-IN" && !hasHiVoice && prep.altText && prep.altLang) {
+          speechText = prep.altText;
+          speechLang = prep.altLang;
+          chosenVoice = getBestVoiceForLang(voices, speechLang) || chosenVoice;
+        }
+
         const utterance = new SpeechSynthesisUtterance(speechText);
         utterance.lang = speechLang;
         utterance.rate = 0.9;
         utterance.pitch = 1.0;
-
-        // Await voices load
-        const voices = await getVoicesAsync();
-        const prefix = speechLang.split("-")[0].toLowerCase();
-
-        const exactMatch = voices.find(
-          (v) => (v.lang || "").toLowerCase().replace("_", "-") === speechLang.toLowerCase()
-        );
-        const prefixMatch = voices.find(
-          (v) => (v.lang || "").toLowerCase().replace("_", "-").startsWith(prefix)
-        );
-        const indianVoice = voices.find((v) => (v.lang || "").toLowerCase().includes("in"));
-        const chosenVoice = exactMatch || prefixMatch || indianVoice || voices[0];
 
         if (chosenVoice) {
           utterance.voice = chosenVoice;
@@ -425,7 +533,11 @@ export default function StudentConsole() {
 
             const trans = (msg.translations as Record<string, string>) || {};
             const curLang = studentLangRef.current || "hi";
-            const myTrans = trans[curLang] || trans["hi"] || trans["en"] || origText;
+            hasLiveSpeechRef.current = true;
+            // If I speak the teacher's language, show the original — never fall
+            // back to Hindi (server omits the source lang from translations).
+            const myTrans =
+              trans[curLang] || (srcLang === curLang ? origText : trans["hi"] || trans["en"] || origText);
             setTranslatedSpeech(myTrans);
             setTtfa((msg.ttfa_seconds as number) || 0.45);
             playSyntheticAudio(myTrans, curLang);
@@ -582,6 +694,21 @@ export default function StudentConsole() {
   }, [joinedSession, studentLang]);
 
   useEffect(() => {
+    // QR-code join: ?server=<edge-url>&code=<class-code> auto-fills both
+    try {
+      const qp = new URLSearchParams(window.location.search);
+      const qrServer = qp.get("server");
+      const qrCode = qp.get("code");
+      if (qrServer) {
+        try { setEdgeServerUrl(qrServer); } catch {}
+      }
+      if (qrCode) {
+        const clean = qrCode.trim().toUpperCase();
+        try { localStorage.setItem("user_class_code", clean); } catch {}
+        setActiveClassCode(clean);
+        setNewCodeInput(clean);
+      }
+    } catch {}
     const s = localStorage.getItem("user_name");
     const l = localStorage.getItem("user_lang") || "hi";
     const ln = localStorage.getItem("user_lang_name") || "Hindi";
@@ -601,11 +728,19 @@ export default function StudentConsole() {
     };
   }, [connectToSession]);
 
-  const handleJoinNewCode = async () => {
-    if (!newCodeInput.trim()) return;
+  const handleJoinNewCode = async (overrideCode?: string, overrideServer?: string) => {
+    const raw = overrideCode ?? newCodeInput;
+    if (!raw.trim()) return;
     setCodeError("");
-    const code = newCodeInput.trim().toUpperCase();
+    const code = raw.trim().toUpperCase();
     try {
+      // QR scans carry the teacher's edge-server URL — adopt it first so the
+      // code lookup hits the SAME server the QR was generated from.
+      if (overrideServer) {
+        try {
+          setEdgeServerUrl(overrideServer);
+        } catch {}
+      }
       await runServerDetect();
       const sess = await getSessionByCode(code);
       if (sess && sess.id) {
@@ -613,12 +748,24 @@ export default function StudentConsole() {
         localStorage.setItem("user_joined_session_id", sess.id);
         setActiveClassCode(code);
         setShowCodeModal(false);
+        setShowScanner(false);
         setNewCodeInput("");
         await connectToSession(code);
       }
     } catch {
       setCodeError(t("sessionNotFoundError") || "Invalid class code or class is not active. Check server connection too.");
     }
+  };
+
+  const handleQrScanned = async (text: string) => {
+    const parsed = parseJoinQr(text);
+    if (!parsed) {
+      setCodeError(t("qrInvalid", "That QR doesn't look like a class code. Try again or type the code."));
+      setShowScanner(false);
+      return;
+    }
+    setNewCodeInput(parsed.code);
+    await handleJoinNewCode(parsed.code, parsed.server);
   };
 
   // Student Raise Hand — uses the SERVER participant id, not the local P-xxx
@@ -717,7 +864,17 @@ export default function StudentConsole() {
     if (SpeechRecognitionClass) {
       try {
         const recognition = new SpeechRecognitionClass();
-        recognition.lang = studentLang === "hi" ? "hi-IN" : studentLang === "en" ? "en-IN" : "hi-IN";
+        const recogLangMap: Record<string, string> = {
+          hi: "hi-IN",
+          en: "en-IN",
+          bn: "bn-IN",
+          mr: "mr-IN",
+          ta: "ta-IN",
+          te: "te-IN",
+          // No Santali voice exists — Hindi is the closest phonetic match
+          sat: "hi-IN",
+        };
+        recognition.lang = recogLangMap[studentLang] || "hi-IN";
         recognition.interimResults = false;
         recognition.maxAlternatives = 3;
 
@@ -814,6 +971,47 @@ export default function StudentConsole() {
     }
   };
 
+  // ── Arcade + teacher-game answers ───────────────────────────────
+  // Correct: +10 pts, streak up, praise spoken IN the student's language.
+  // Wrong: streak resets, gentle encouragement spoken, retry allowed
+  // (wrong taps are never silent — that felt broken).
+  const answerArcade = (opt: string) => {
+    if (!arcadeRound || arcadeSolved) return;
+    const lang = normalizeFlnLang(studentLang);
+    if (opt === arcadeCorrect) {
+      setArcadePicked(opt);
+      setGameScore((s) => s + 10);
+      setArcadeStreak((s) => s + 1);
+      const praise = pickPraise(lang);
+      avatar.happy(praise);
+      playSyntheticAudio(praise, studentLang);
+      window.setTimeout(() => setArcadeRoundKey((k) => k + 1), 1500);
+    } else {
+      setArcadePicked(opt);
+      setArcadeStreak(0);
+      const enc = pickEncourage(lang);
+      avatar.encourage(enc);
+      playSyntheticAudio(enc, studentLang);
+    }
+  };
+
+  const answerServerGame = (gid: string, game: ServerGame, opt: string) => {
+    if (serverPicked[gid] === game.correct) return;
+    const lang = normalizeFlnLang(studentLang);
+    if (opt === game.correct) {
+      setServerPicked((p) => ({ ...p, [gid]: opt }));
+      setGameScore((s) => s + (game.points || 10));
+      const praise = pickPraise(lang);
+      avatar.happy(praise);
+      playSyntheticAudio(praise, studentLang);
+    } else {
+      setServerPicked((p) => ({ ...p, [gid]: opt }));
+      const enc = pickEncourage(lang);
+      avatar.encourage(enc);
+      playSyntheticAudio(enc, studentLang);
+    }
+  };
+
   const tabs = [
     { id: "LISTEN" as const, label: t("tabListen"), icon: <Volume2 className="w-4 h-4" /> },
     { id: "QUIZ" as const, label: t("quizTab"), icon: <HelpCircle className="w-4 h-4" /> },
@@ -824,55 +1022,61 @@ export default function StudentConsole() {
 
   return (
     <div className="min-h-screen vs-bg flex flex-col">
-      {/* ── App Bar ────────────────────────────────────────────────── */}
-      <header className="vs-surface border-0 border-b border-[var(--border)] px-4 sm:px-6 py-3 flex items-center justify-between sticky top-0 z-30 shadow-xs">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => router.push("/")}
-            title="Back to Home"
-            className="p-2 rounded-xl hover:bg-[var(--surface-2)] text-[var(--text-secondary)] transition"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </button>
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-full bg-[var(--brand)] text-[#0c1a2e] font-black text-base flex items-center justify-center shadow-xs">
+      {/* ── App Bar (two rows — nothing gets cut off on phones) ────── */}
+      <header className="vs-surface border-0 border-b border-[var(--border)] px-3 sm:px-6 py-2.5 space-y-2 sticky top-0 z-30 shadow-xs">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <button
+              onClick={() => router.push("/")}
+              title="Back to Home"
+              className="p-1.5 rounded-lg hover:bg-[var(--surface-2)] text-[var(--text-secondary)] transition shrink-0"
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+            <div className="w-8 h-8 rounded-full bg-[var(--brand)] text-[#0c1a2e] font-black text-sm flex items-center justify-center shadow-xs shrink-0">
               {studentName.charAt(0)}
             </div>
-            <div>
-              <p className="text-sm font-extrabold text-[var(--text-primary)] leading-none">{studentName}</p>
-              <p className="text-[10px] text-[var(--text-muted)] mt-0.5 font-medium">
+            <div className="min-w-0">
+              <p className="text-sm font-extrabold text-[var(--text-primary)] leading-none truncate">{studentName}</p>
+              <p className="text-[10px] text-[var(--text-muted)] mt-0.5 font-medium truncate">
                 {t("class")} {classGrade || grade}
-                {classSubject ? (
-                  <> · <span className="text-[var(--brand-deep)] font-bold">{t(getLocalizedSubjectKey(classSubject), classSubject)}</span></>
-                ) : null}
                  · <span className="text-[var(--brand-deep)] font-bold">{studentLangName}</span>
               </p>
             </div>
           </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <LanguageSwitch />
+            <ThemeToggle />
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Class Code Chip */}
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-bold text-[var(--text-primary)] shadow-2xs">
-            <span className="text-[10px] text-[var(--text-muted)]">CLASS:</span>
-            <span className="font-mono font-black text-[var(--brand-deep)] uppercase tracking-wider">
-              {activeClassCode || "None"}
+        <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-[var(--border-sub)]">
+          {/* Class code — whole chip is tappable, opens the change-code modal */}
+          <button
+            onClick={() => setShowCodeModal(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[11px] font-bold text-[var(--text-primary)] active:scale-95 transition min-w-0"
+            title={t("changeCodeBtn") || "Change class code"}
+          >
+            <Key className="w-3 h-3 text-[var(--brand-deep)] shrink-0" />
+            <span className="font-mono font-black text-[var(--brand-deep)] uppercase tracking-wider truncate">
+              {activeClassCode || "—"}
             </span>
-            <button
-              onClick={() => setShowCodeModal(true)}
-              className="text-[10px] font-bold text-[var(--brand-deep)] underline ml-1 hover:opacity-80"
-            >
-              Change
-            </button>
-          </div>
-
-          <LanguageSwitch />
-          <ThemeToggle />
+          </button>
+          {classSubject ? (
+            <span className="text-[11px] font-bold text-[var(--brand-deep)] truncate">
+              {t(getLocalizedSubjectKey(classSubject), classSubject)}
+            </span>
+          ) : (
+            <span className="text-[11px] text-[var(--text-muted)]">
+              {wsConnected ? t("live") : t("offline")}
+            </span>
+          )}
         </div>
       </header>
 
       {/* ── Navigation Tabs ────────────────────────────────────────── */}
-      <nav className="vs-surface border-0 border-b border-[var(--border)] px-3 py-2 flex items-center justify-center gap-1.5 overflow-x-auto">
+      <nav className="vs-surface border-0 border-b border-[var(--border)] px-3 py-2 flex items-center justify-start sm:justify-center gap-1.5 overflow-x-auto">
         {tabs.map((tab) => (
           <button
             key={tab.id}
@@ -905,10 +1109,10 @@ export default function StudentConsole() {
             <span className={`w-2 h-2 rounded-full ${serverOnline ? "bg-[var(--green)]" : serverOnline === false ? "bg-[var(--red)]" : "bg-[var(--amber)] animate-pulse"}`} />
             <span className="font-bold">
               {serverDetecting
-                ? "Searching for teacher's edge server…"
+                ? (t("searchingEdge") || "Searching for teacher's edge server…")
                 : serverOnline
-                ? `Connected · ${serverUrl}${joinedSession ? (wsConnected ? " · Live updates ON" : " · Reconnecting live updates…") : " · No class joined yet"}`
-                : `OFFLINE — no quiz/voice will arrive until connected · ${serverUrl || "no server"}`}
+                ? `${t("edgeConnected") || "Connected"} · ${serverUrl}${joinedSession ? (wsConnected ? " · Live updates ON" : " · Reconnecting live updates…") : " · No class joined yet"}`
+                : `${t("edgeOffline") || "OFFLINE — no quiz/voice will arrive until connected"} · ${serverUrl || "no server"}`}
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -919,14 +1123,14 @@ export default function StudentConsole() {
               }}
               className="px-2.5 py-1 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--text-primary)] font-bold"
             >
-              Set server
+              {t("setServerBtn") || "Set server"}
             </button>
             <button
               onClick={() => connectToSession()}
               disabled={serverDetecting}
               className="px-2.5 py-1 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--text-primary)] font-bold disabled:opacity-50"
             >
-              Retry
+              {t("retryBtn") || "Retry"}
             </button>
           </div>
         </div>
@@ -1067,6 +1271,15 @@ export default function StudentConsole() {
         {/* QUIZ TAB */}
         {activeTab === "QUIZ" && (
           <div className="space-y-4">
+            {/* Avatar Guide for Quiz */}
+            <AvatarGuide
+              state={avatar.state}
+              message={avatar.message}
+              showHint={avatar.state === "hint"}
+              hintText={avatar.hintText}
+              className="w-full"
+            />
+
             {(() => {
               const quizList = activities.filter(
                 (a) => a.activity_type === "QUIZ" || Boolean(a.content?.questions && a.content.questions.length > 0)
@@ -1105,6 +1318,9 @@ export default function StudentConsole() {
                   });
                   const pct = questions.length > 0 ? Math.round((correctCount / questions.length) * 100) : 100;
                   setSubmittedScores((prev) => ({ ...prev, [act.activity_id]: pct }));
+                  if (pct >= 80) avatar.celebrate("Amazing! You nailed it! 🎉");
+                  else if (pct >= 50) avatar.happy("Great effort! 🌟");
+                  else avatar.encourage("Keep practicing! You'll get better! 💪");
                 };
 
                 return (
@@ -1161,20 +1377,23 @@ export default function StudentConsole() {
 
                             {q.options && (
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                                {q.options.map((opt) => (
-                                  <button
-                                    key={opt}
-                                    disabled={isSubmitted}
-                                    onClick={() => setSelectedAnswers((prev) => ({ ...prev, [q.id]: opt }))}
-                                    className={`p-3 rounded-xl font-bold text-xs text-left transition border-2 ${
-                                      selectedAnswers[q.id] === opt
-                                        ? "border-[var(--brand)] bg-[var(--brand)] text-[#0c1a2e] shadow-xs"
-                                        : "border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-primary)] hover:border-[var(--brand)]"
-                                    }`}
-                                  >
-                                    {opt}
-                                  </button>
-                                ))}
+{q.options.map((opt) => (
+                                    <button
+                                      key={opt}
+                                      disabled={isSubmitted}
+                                      onClick={() => {
+                                        setSelectedAnswers((prev) => ({ ...prev, [q.id]: opt }));
+                                        avatar.happy("Nice choice! 🌟");
+                                      }}
+                                      className={`p-3 rounded-xl font-bold text-xs text-left transition border-2 ${
+                                        selectedAnswers[q.id] === opt
+                                          ? "border-[var(--brand)] bg-[var(--brand)] text-[#0c1a2e] shadow-xs"
+                                          : "border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-primary)] hover:border-[var(--brand)]"
+                                      }`}
+                                    >
+                                      {opt}
+                                    </button>
+                                  ))}
                               </div>
                             )}
                           </div>
@@ -1212,6 +1431,15 @@ export default function StudentConsole() {
         {/* WORKSHEET TAB */}
         {activeTab === "WORKSHEET" && (
           <div className="space-y-4">
+            {/* Avatar Guide for Worksheets */}
+            <AvatarGuide
+              state={avatar.state}
+              message={avatar.message}
+              showHint={avatar.state === "hint"}
+              hintText={avatar.hintText}
+              className="w-full"
+            />
+
             {(() => {
               const worksheetList = activities.filter(
                 (a) => a.activity_type === "WORKSHEET" || Boolean((a.content as Record<string, unknown>)?.tasks)
@@ -1276,7 +1504,10 @@ export default function StudentConsole() {
                       ))}
 
                       <button
-                        onClick={() => setSubmittedScores((prev) => ({ ...prev, [act.activity_id]: 100 }))}
+                        onClick={() => {
+                          setSubmittedScores((prev) => ({ ...prev, [act.activity_id]: 100 }));
+                          avatar.celebrate("Worksheet submitted! Great work! 🎉");
+                        }}
                         disabled={isSubmitted}
                         className="w-full py-3 rounded-xl bg-[var(--green)] text-white font-bold text-xs transition hover:opacity-90 disabled:opacity-50"
                       >
@@ -1293,6 +1524,15 @@ export default function StudentConsole() {
         {/* FLASHCARDS TAB */}
         {activeTab === "FLASHCARDS" && (
           <div className="space-y-4">
+            {/* Avatar Guide for Flashcards */}
+            <AvatarGuide
+              state={avatar.state}
+              message={avatar.message}
+              showHint={avatar.state === "hint"}
+              hintText={avatar.hintText}
+              className="w-full"
+            />
+
             {(() => {
               const cardActivities = activities.filter(
                 (a) => a.activity_type === "FLASHCARD" || Boolean((a.content as Record<string, unknown>)?.cards)
@@ -1424,7 +1664,7 @@ export default function StudentConsole() {
           </div>
         )}
 
-        {/* FLN GAMES */}
+        {/* FLN GAMES — teacher-sent games first, arcade fallback */}
         {activeTab === "GAMES" && (
           <div className="space-y-4">
             <div className="vs-surface rounded-2xl p-5 border border-[var(--brand-tint2)] bg-[var(--brand-tint)]/40 flex items-center justify-between shadow-xs">
@@ -1439,170 +1679,241 @@ export default function StudentConsole() {
                   {t("interactiveGamesDesc")} {grade} · <span className="font-bold">{studentLangName}</span>
                 </p>
               </div>
-              <div className="px-3.5 py-1.5 rounded-xl bg-[var(--surface)] border border-[var(--brand-tint2)] text-xs font-black text-[var(--brand-deep)] shadow-2xs">
-                ⭐ {gameScore} {t("stars")}
+              <div className="flex items-center gap-2">
+                {arcadeStreak > 1 && (
+                  <div className="px-3.5 py-1.5 rounded-xl bg-[var(--amber-tint)] border border-[var(--amber-tint)] text-xs font-black text-[var(--amber)] flex items-center gap-1">
+                    <Flame className="w-3.5 h-3.5" /> {arcadeStreak} {FLN_STRINGS[normalizeFlnLang(studentLang)].streak}
+                  </div>
+                )}
+                <div className="px-3.5 py-1.5 rounded-xl bg-[var(--surface)] border border-[var(--brand-tint2)] text-xs font-black text-[var(--brand-deep)] shadow-2xs">
+                  ⭐ {gameScore} {t("stars")}
+                </div>
               </div>
             </div>
 
-            <div className="vs-surface rounded-2xl p-6 text-center space-y-5 border border-[var(--border)] shadow-xs">
-              <div className="flex items-center justify-between text-xs text-[var(--text-muted)] font-bold uppercase tracking-wider">
-                <span>{t("game")} {activeGameIndex + 1} {t("of")} 3</span>
-                <span>{t("nipunFoundational")}</span>
-              </div>
+            <AvatarGuide
+              state={avatar.state}
+              message={avatar.message}
+              showHint={avatar.state === "hint"}
+              hintText={avatar.hintText}
+              className="w-full"
+            />
 
-              {activeGameIndex === 0 && (
-                <div className="space-y-4">
-                  <h4 className="text-lg font-black text-[var(--text-primary)]">
-                    {studentLang === "sat"
-                      ? "ᱮᱞᱠᱷᱟ: ᱛᱤᱱᱟᱹᱜ ᱥᱮᱣ ᱢᱮᱱᱟᱜᱼᱟ?"
-                      : studentLang === "hi"
-                      ? "गिनती: कितने सेब हैं?"
-                      : studentLang === "bn"
-                      ? "গণনা: কয়টি আপেল আছে?"
-                      : studentLang === "mr"
-                      ? "मोजणी: किती सफरचंद आहेत?"
-                      : studentLang === "ta"
-                      ? "எண்ணிக்கை: எத்தனை ஆப்பிள்கள் உள்ளன?"
-                      : studentLang === "te"
-                      ? "లెక్కించడం: ఎన్ని యాపిల్స్ ఉన్నాయి?"
-                      : "Counting: How many apples?"}
-                  </h4>
-                  <div className="flex items-center justify-center gap-4 text-5xl py-6 bg-[var(--surface-2)] rounded-2xl border border-[var(--border)]">
-                    🍎 🍎 🍎 🍎
-                  </div>
-                  <button
-                    onClick={() => playSyntheticAudio(studentLang === "sat" ? "ᱯᱩᱱᱭᱟᱹ ᱥᱮᱣ" : studentLang === "hi" ? "चार सेब हैं" : "Four apples", studentLang)}
-                    className="mx-auto px-4 py-2 rounded-xl bg-[var(--brand-tint)] text-[var(--brand-deep)] font-bold text-xs flex items-center gap-2 hover:bg-[var(--brand-tint2)] transition"
-                  >
-                    <Volume2 className="w-4 h-4" /> {t("listenAudio")}
-                  </button>
-                  <div className="grid grid-cols-4 gap-2 pt-2">
-                    {["2", "3", "4", "5"].map((num) => (
-                      <button
-                        key={num}
-                        onClick={() => {
-                          if (num === "4") {
-                            setGameScore((s) => s + 10);
-                            playSyntheticAudio(studentLang === "sat" ? "ᱥᱟᱹᱨᱤ ᱜᱮ! ᱯᱩᱱᱭᱟᱹ" : studentLang === "hi" ? "सही जवाब! चार" : "Correct! Four", studentLang);
-                          }
-                        }}
-                        className="py-4 rounded-xl bg-[var(--surface-2)] border-2 border-[var(--border)] hover:border-[var(--brand)] text-xl font-bold text-[var(--text-primary)] transition active:scale-95"
-                      >
-                        {num}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
+            {(() => {
+              const S = FLN_STRINGS[normalizeFlnLang(studentLang)];
+              const serverGames: Array<{ gid: string; game: ServerGame }> = [];
+              activities.forEach((a) => {
+                const g = (a.content as unknown as { games?: unknown })?.games;
+                if (isServerGameList(g)) {
+                  g.forEach((game, gi) => serverGames.push({ gid: `${a.activity_id}-g${gi}`, game }));
+                }
+              });
 
-              {activeGameIndex === 1 && (
-                <div className="space-y-4">
-                  <h4 className="text-lg font-black text-[var(--text-primary)]">
-                    {studentLang === "sat"
-                      ? "ᱟᱠᱷᱚᱨ: 'ᱚ' ᱪᱤᱦᱱᱟᱹᱣ ᱢᱮ"
-                      : studentLang === "hi"
-                      ? "वर्णमाला: अक्षर 'अ' पहचानें"
-                      : studentLang === "bn"
-                      ? "বর্ণমালা: 'অ' অক্ষরটি চিহ্নিত করুন"
-                      : studentLang === "mr"
-                      ? "वर्णमाला: 'अ' अक्षर ओळखा"
-                      : studentLang === "ta"
-                      ? "எழுத்து: 'அ' எழுத்தை அடையாளம் காணவும்"
-                      : studentLang === "te"
-                      ? "అక్షరం: 'అ' అక్షరాన్ని గుర్తించండి"
-                      : "Alphabet: Identify letter 'A'"}
-                  </h4>
-                  <div className="text-6xl py-6 bg-[var(--violet-tint)] text-[var(--violet)] rounded-2xl font-black border border-[var(--violet-tint)]">
-                    {studentLang === "sat" ? "ᱚ" : studentLang === "hi" || studentLang === "mr" ? "अ" : studentLang === "bn" ? "অ" : studentLang === "ta" ? "அ" : studentLang === "te" ? "అ" : "A"}
-                  </div>
-                  <div className="grid grid-cols-3 gap-3 pt-2">
-                    {(studentLang === "sat" ? ["ᱚ", "ᱛ", "ᱜ"] : studentLang === "hi" || studentLang === "mr" ? ["अ", "क", "म"] : studentLang === "bn" ? ["অ", "ক", "ম"] : studentLang === "ta" ? ["அ", "க", "ம"] : studentLang === "te" ? ["అ", "క", "మ"] : ["A", "B", "C"]).map((char) => (
-                      <button
-                        key={char}
-                        onClick={() => {
-                          if (char === (studentLang === "sat" ? "ᱚ" : studentLang === "hi" || studentLang === "mr" ? "अ" : studentLang === "bn" ? "অ" : studentLang === "ta" ? "அ" : studentLang === "te" ? "అ" : "A")) {
-                            setGameScore((s) => s + 10);
-                            playSyntheticAudio(studentLang === "sat" ? "ᱟᱹᱰᱤ ᱵᱮᱥ!" : studentLang === "hi" ? "बहुत बढ़िया!" : "Well done!", studentLang);
-                          }
-                        }}
-                        className="py-4 rounded-2xl bg-[var(--surface-2)] border-2 border-[var(--border)] hover:border-[var(--brand)] text-3xl font-black text-[var(--text-primary)] transition active:scale-95"
-                      >
-                        {char}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
+              const optClass = (opt: string, correct: string, picked: string | null | undefined, big?: boolean) => {
+                const isCorrect = opt === correct;
+                const solved = picked === correct;
+                return `rounded-xl border-2 transition active:scale-95 font-bold text-[var(--text-primary)] ${
+                  big ? "py-4 text-3xl" : "py-3.5 text-sm"
+                } ${
+                  solved && isCorrect
+                    ? "border-[var(--green)] bg-[var(--green)] text-white shadow-xs"
+                    : solved
+                    ? "border-[var(--border)] bg-[var(--surface-2)] opacity-50"
+                    : picked === opt
+                    ? "border-[var(--red)] bg-[var(--red-tint)] text-[var(--red)]"
+                    : "border-[var(--border)] bg-[var(--surface-2)] hover:border-[var(--brand)]"
+                }`;
+              };
 
-              {activeGameIndex === 2 && (
-                <div className="space-y-4">
-                  <h4 className="text-lg font-black text-[var(--text-primary)]">
-                    {studentLang === "sat"
-                      ? "ᱡᱤᱣᱤᱭᱟᱹᱞᱤ: ᱱᱩᱭ ᱫᱚ ᱚᱠᱚᱭ?"
-                      : studentLang === "hi"
-                      ? "पशु ज्ञान: यह कौन सा जानवर है?"
-                      : studentLang === "bn"
-                      ? "প্রাণী পরিচিতি: এটি কোন প্রাণী?"
-                      : studentLang === "mr"
-                      ? "प्राणी ज्ञान: हा कोणता प्राणी आहे?"
-                      : studentLang === "ta"
-                      ? "விலங்கு அறிவு: இது எந்த விலங்கு?"
-                      : studentLang === "te"
-                      ? "జంతు జ్ఞానం: ఇది ఏ జంతువు?"
-                      : "Animal Knowledge: Which animal is this?"}
-                  </h4>
-                  <div className="text-6xl py-6 bg-[var(--green-tint)] rounded-2xl border border-[var(--green-tint)]">
-                    🐘
-                  </div>
-                  <div className="grid grid-cols-2 gap-3 pt-2">
-                    {(studentLang === "sat"
-                      ? [{ name: "ᱦᱟᱹᱛᱤ", correct: true }, { name: "ᱥᱤᱢ", correct: false }]
-                      : studentLang === "hi"
-                      ? [{ name: "हाथी", correct: true }, { name: "शेर", correct: false }]
-                      : studentLang === "bn"
-                      ? [{ name: "হাতি", correct: true }, { name: "সিংহ", correct: false }]
-                      : studentLang === "mr"
-                      ? [{ name: "हत्ती", correct: true }, { name: "सिंह", correct: false }]
-                      : studentLang === "ta"
-                      ? [{ name: "யானை", correct: true }, { name: "சிங்கம்", correct: false }]
-                      : studentLang === "te"
-                      ? [{ name: "ఏనుగు", correct: true }, { name: "సింహం", correct: false }]
-                      : [{ name: "Elephant", correct: true }, { name: "Rooster", correct: false }]
-                    ).map((opt, idx) => (
-                      <button
-                        key={idx}
-                        onClick={() => {
-                          if (opt.correct) {
-                            setGameScore((s) => s + 10);
-                            playSyntheticAudio(studentLang === "sat" ? "ᱥᱟᱹᱨᱤ ᱜᱮ! ᱦᱟᱹᱛᱤ" : studentLang === "hi" ? "सही उत्तर! हाथी" : "Correct! Elephant", studentLang);
-                          }
-                        }}
-                        className="py-3.5 rounded-xl bg-[var(--surface-2)] border-2 border-[var(--border)] hover:border-[var(--brand)] text-sm font-bold text-[var(--text-primary)] transition active:scale-95"
-                      >
-                        {opt.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Navigation */}
-              <div className="flex justify-between pt-4 border-t border-[var(--border-sub)]">
+              const listenBtn = (text: string) => (
                 <button
-                  onClick={() => setActiveGameIndex((i) => Math.max(0, i - 1))}
-                  disabled={activeGameIndex === 0}
-                  className="px-4 py-2 rounded-xl bg-[var(--surface-2)] text-[var(--text-secondary)] font-bold text-xs disabled:opacity-40"
+                  onClick={() => playSyntheticAudio(text, studentLang)}
+                  className="mx-auto px-4 py-2 rounded-xl bg-[var(--brand-tint)] text-[var(--brand-deep)] font-bold text-xs flex items-center gap-2 hover:bg-[var(--brand-tint2)] transition"
                 >
-                  ← {t("prevGame")}
+                  <Volume2 className="w-4 h-4" /> {t("listenAudio")} · {S.listen}
                 </button>
-                <button
-                  onClick={() => setActiveGameIndex((i) => (i + 1) % 3)}
-                  className="px-4 py-2 rounded-xl vs-btn-brand text-xs"
-                >
-                  {t("nextGame")} →
-                </button>
-              </div>
-            </div>
+              );
+
+              return (
+                <>
+                  {serverGames.length > 0 && (
+                    <div className="space-y-3">
+                      {serverGames.map(({ gid, game }) => {
+                        const picked = serverPicked[gid] ?? null;
+                        return (
+                          <div key={gid} className="vs-surface rounded-2xl p-5 border border-[var(--border)] shadow-xs space-y-4">
+                            <div>
+                              <h4 className="text-base font-black text-[var(--text-primary)]">{game.title}</h4>
+                              {game.instruction && (
+                                <p className="text-xs text-[var(--text-secondary)] mt-1">{game.instruction}</p>
+                              )}
+                            </div>
+                            {game.visual && (
+                              <div className="flex items-center justify-center gap-2 text-4xl py-5 bg-[var(--surface-2)] rounded-2xl border border-[var(--border)]">
+                                {game.visual}
+                              </div>
+                            )}
+                            {listenBtn(game.audio_text || game.instruction || game.title)}
+                            <div className="grid grid-cols-2 gap-2">
+                              {game.options.map((opt) => (
+                                <button
+                                  key={opt}
+                                  onClick={() => answerServerGame(gid, game, opt)}
+                                  className={optClass(opt, game.correct, picked)}
+                                >
+                                  {opt}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {arcadeGame === null ? (
+                    <div className="vs-surface rounded-2xl p-5 border border-[var(--border)] shadow-xs space-y-3">
+                      <p className="text-sm font-extrabold text-[var(--text-primary)]">🎮 {S.pickGame}</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {(
+                          [
+                            { id: "count" as const, icon: <Hash className="w-5 h-5" />, name: S.countName, desc: S.countDesc, tint: "var(--brand-tint)" },
+                            { id: "phonics" as const, icon: <Type className="w-5 h-5" />, name: S.phonicsName, desc: S.phonicsDesc, tint: "var(--violet-tint)" },
+                            { id: "match" as const, icon: <Shapes className="w-5 h-5" />, name: S.matchName, desc: S.matchDesc, tint: "var(--green-tint)" },
+                            { id: "add" as const, icon: <Plus className="w-5 h-5" />, name: S.addName, desc: S.addDesc, tint: "var(--amber-tint)" },
+                          ]
+                        ).map((g) => (
+                          <button
+                            key={g.id}
+                            onClick={() => {
+                              setArcadeGame(g.id);
+                              setArcadeStreak(0);
+                            }}
+                            className="p-4 rounded-2xl border-2 border-[var(--border)] bg-[var(--surface-2)] hover:border-[var(--brand)] text-left transition active:scale-95 space-y-1.5"
+                          >
+                            <span className="inline-flex p-2 rounded-xl" style={{ backgroundColor: g.tint }}>
+                              {g.icon}
+                            </span>
+                            <span className="block text-sm font-black text-[var(--text-primary)]">{g.name}</span>
+                            <span className="block text-[11px] text-[var(--text-muted)]">{g.desc}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="vs-surface rounded-2xl p-5 sm:p-6 border border-[var(--border)] shadow-xs space-y-4">
+                      <div className="flex items-center justify-between">
+                        <button
+                          onClick={() => setArcadeGame(null)}
+                          className="px-3 py-1.5 rounded-xl bg-[var(--surface-2)] text-[var(--text-secondary)] font-bold text-xs"
+                        >
+                          ← {S.pickGame}
+                        </button>
+                        <button
+                          onClick={() => setArcadeRoundKey((k) => k + 1)}
+                          className="px-3 py-1.5 rounded-xl bg-[var(--surface-2)] text-[var(--text-secondary)] font-bold text-xs flex items-center gap-1.5"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" /> {S.newRound}
+                        </button>
+                      </div>
+
+                      {arcadeRound?.kind === "count" && (
+                        <div className="space-y-4 text-center">
+                          <h4 className="text-lg font-black text-[var(--text-primary)]">
+                            {S.howMany(arcadeRound.item)}
+                          </h4>
+                          <div className="flex flex-wrap items-center justify-center gap-2 text-3xl py-6 bg-[var(--surface-2)] rounded-2xl border border-[var(--border)]">
+                            {Array.from({ length: arcadeRound.count }).map((_, i) => (
+                              <span key={i}>{arcadeRound.emoji}</span>
+                            ))}
+                          </div>
+                          {listenBtn(S.howMany(arcadeRound.item))}
+                          <div className="grid grid-cols-4 gap-2">
+                            {arcadeRound.options.map((num) => (
+                              <button
+                                key={num}
+                                onClick={() => answerArcade(num)}
+                                className={`${optClass(num, arcadeCorrect, arcadePicked)} text-xl`}
+                              >
+                                {num}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {arcadeRound?.kind === "phonics" && (
+                        <div className="space-y-4 text-center">
+                          <h4 className="text-lg font-black text-[var(--text-primary)]">
+                            {S.firstSound(arcadeRound.word)}
+                          </h4>
+                          <div className="py-6 bg-[var(--violet-tint)] rounded-2xl border border-[var(--violet-tint)] space-y-1">
+                            <div className="text-5xl">{arcadeRound.emoji}</div>
+                            <div className="text-2xl font-black text-[var(--text-primary)]">{arcadeRound.word}</div>
+                          </div>
+                          {listenBtn(S.firstSound(arcadeRound.word))}
+                          <div className="grid grid-cols-3 gap-3">
+                            {arcadeRound.options.map((ch) => (
+                              <button
+                                key={ch}
+                                onClick={() => answerArcade(ch)}
+                                className={optClass(ch, arcadeCorrect, arcadePicked, true)}
+                              >
+                                {ch}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {arcadeRound?.kind === "match" && (
+                        <div className="space-y-4 text-center">
+                          <h4 className="text-lg font-black text-[var(--text-primary)]">{S.pickWord}</h4>
+                          <div className="text-6xl py-6 bg-[var(--green-tint)] rounded-2xl border border-[var(--green-tint)]">
+                            {arcadeRound.emoji}
+                          </div>
+                          {listenBtn(S.pickWord)}
+                          <div className="grid grid-cols-1 gap-2">
+                            {arcadeRound.options.map((w) => (
+                              <button
+                                key={w}
+                                onClick={() => answerArcade(w)}
+                                className={optClass(w, arcadeCorrect, arcadePicked)}
+                              >
+                                {w}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {arcadeRound?.kind === "add" && (
+                        <div className="space-y-4 text-center">
+                          <h4 className="text-lg font-black text-[var(--text-primary)]">
+                            {S.addUp(arcadeRound.a, arcadeRound.b)}
+                          </h4>
+                          <div className="py-6 bg-[var(--amber-tint)] rounded-2xl border border-[var(--amber-tint)] text-5xl font-black text-[var(--text-primary)]">
+                            {arcadeRound.a} + {arcadeRound.b} = ?
+                          </div>
+                          {listenBtn(S.addUp(arcadeRound.a, arcadeRound.b))}
+                          <div className="grid grid-cols-4 gap-2">
+                            {arcadeRound.options.map((num) => (
+                              <button
+                                key={num}
+                                onClick={() => answerArcade(num)}
+                                className={`${optClass(num, arcadeCorrect, arcadePicked)} text-xl`}
+                              >
+                                {num}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
         )}
       </main>
@@ -1621,6 +1932,7 @@ export default function StudentConsole() {
               <button
                 onClick={() => {
                   setShowCodeModal(false);
+                  setShowScanner(false);
                   setCodeError("");
                 }}
                 className="p-1.5 rounded-xl hover:bg-[var(--surface-2)] text-[var(--text-secondary)] transition"
@@ -1633,24 +1945,43 @@ export default function StudentConsole() {
               {t("classCodeSub") || "Enter the 6-character code given by your teacher to join their class."}
             </p>
 
-            <input
-              type="text"
-              value={newCodeInput}
-              onChange={(e) => setNewCodeInput(e.target.value.toUpperCase())}
-              placeholder="e.g. MATH42"
-              maxLength={8}
-              className="vs-input w-full px-4 py-3 rounded-xl font-mono text-center text-lg font-bold tracking-widest uppercase"
-            />
+            {showScanner ? (
+              <QrScanner onScan={handleQrScanned} onClose={() => setShowScanner(false)} />
+            ) : (
+              <>
+                <input
+                  type="text"
+                  value={newCodeInput}
+                  onChange={(e) => setNewCodeInput(e.target.value.toUpperCase())}
+                  placeholder="e.g. MATH42"
+                  maxLength={8}
+                  className="vs-input w-full px-4 py-3 rounded-xl font-mono text-center text-lg font-bold tracking-widest uppercase"
+                />
+
+                <button
+                  onClick={() => {
+                    setCodeError("");
+                    setShowScanner(true);
+                  }}
+                  className="w-full py-3 rounded-xl text-sm font-bold border-2 border-dashed border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--brand)] hover:text-[var(--brand-deep)] transition flex items-center justify-center gap-2"
+                >
+                  <QrCode className="w-4 h-4" />
+                  {t("qrScanBtn", "Scan QR instead")}
+                </button>
+              </>
+            )}
 
             {codeError && <p className="text-xs font-bold text-[var(--red)] text-center">{codeError}</p>}
 
-            <button
-              onClick={handleJoinNewCode}
-              disabled={!newCodeInput.trim()}
-              className="w-full vs-btn-brand py-3 rounded-xl text-sm font-extrabold shadow-sm disabled:opacity-50"
-            >
-              {t("joinClassroom")}
-            </button>
+            {!showScanner && (
+              <button
+                onClick={() => handleJoinNewCode()}
+                disabled={!newCodeInput.trim()}
+                className="w-full vs-btn-brand py-3 rounded-xl text-sm font-extrabold shadow-sm disabled:opacity-50"
+              >
+                {t("joinClassroom")}
+              </button>
+            )}
           </div>
         </div>
       )}

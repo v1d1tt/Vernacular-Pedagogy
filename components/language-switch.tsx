@@ -45,40 +45,60 @@ export function LanguageSwitch({ className = "" }: { className?: string }) {
           <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] border-b border-[var(--border-sub)]">
             {t("switchLanguage", "Language / भाषा")}
           </div>
-          <div className="py-1 max-h-72 overflow-y-auto">
-            {supportedLanguages.map((item) => {
-              const active = item.code === lang;
-              const isDisabled = item.disabled;
+          <div className="py-1 max-h-[60vh] overflow-y-auto">
+            {(() => {
+              // Working languages first (primary, then extended), "Coming soon"
+              // last — previously two dead rows sat in the middle and pushed
+              // Bengali/Marathi/Tamil/Telugu below the scroll fold on phones.
+              const enabled = supportedLanguages.filter((l) => !l.disabled);
+              const coming = supportedLanguages.filter((l) => l.disabled);
+              const renderItem = (item: (typeof supportedLanguages)[number]) => {
+                const active = item.code === lang;
+                const isDisabled = item.disabled;
+                return (
+                  <button
+                    key={item.code}
+                    disabled={isDisabled}
+                    onClick={() => {
+                      if (isDisabled) return;
+                      setLang(item.code as LanguageCode);
+                      setIsOpen(false);
+                    }}
+                    className={`w-full px-3 py-2 text-left flex items-center justify-between text-xs transition ${isDisabled
+                      ? "opacity-50 cursor-not-allowed bg-transparent"
+                      : active
+                        ? "bg-[var(--brand-tint)] text-[var(--brand-deep)] font-bold"
+                        : "text-[var(--text-primary)] hover:bg-[var(--surface-2)]"
+                      }`}
+                  >
+                    <div className="flex flex-col">
+                      <span className="font-bold text-xs">{item.nativeName}</span>
+                      <span className="text-[10px] text-[var(--text-muted)]">{item.name}</span>
+                    </div>
+                    {isDisabled ? (
+                      <span className="text-[9px] font-extrabold uppercase tracking-wider bg-[var(--surface-2)] text-[var(--text-muted)] px-1.5 py-0.5 rounded">
+                        {item.badge || "Soon"}
+                      </span>
+                    ) : (
+                      active && <Check className="w-3.5 h-3.5 text-[var(--brand)]" />
+                    )}
+                  </button>
+                );
+              };
               return (
-                <button
-                  key={item.code}
-                  disabled={isDisabled}
-                  onClick={() => {
-                    if (isDisabled) return;
-                    setLang(item.code as LanguageCode);
-                    setIsOpen(false);
-                  }}
-                  className={`w-full px-3 py-2 text-left flex items-center justify-between text-xs transition ${isDisabled
-                    ? "opacity-50 cursor-not-allowed bg-transparent"
-                    : active
-                      ? "bg-[var(--brand-tint)] text-[var(--brand-deep)] font-bold"
-                      : "text-[var(--text-primary)] hover:bg-[var(--surface-2)]"
-                    }`}
-                >
-                  <div className="flex flex-col">
-                    <span className="font-bold text-xs">{item.nativeName}</span>
-                    <span className="text-[10px] text-[var(--text-muted)]">{item.name}</span>
-                  </div>
-                  {isDisabled ? (
-                    <span className="text-[9px] font-extrabold uppercase tracking-wider bg-[var(--surface-2)] text-[var(--text-muted)] px-1.5 py-0.5 rounded">
-                      {item.badge || "Soon"}
-                    </span>
-                  ) : (
-                    active && <Check className="w-3.5 h-3.5 text-[var(--brand)]" />
+                <>
+                  {enabled.map(renderItem)}
+                  {coming.length > 0 && (
+                    <>
+                      <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] border-t border-[var(--border-sub)] mt-1">
+                        {t("comingSoon", "Coming soon")}
+                      </div>
+                      {coming.map(renderItem)}
+                    </>
                   )}
-                </button>
+                </>
               );
-            })}
+            })()}
           </div>
         </div>
       )}

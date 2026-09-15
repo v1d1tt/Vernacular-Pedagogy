@@ -48,7 +48,10 @@ import {
   Plus,
   RefreshCw,
   School,
+  QrCode,
+  Smartphone,
 } from "lucide-react";
+// QRCode is imported dynamically in generateQRCode to avoid SSR issues
 import { MicWaveform } from "@/components/mic-waveform";
 
 export interface SessionInfo {
@@ -92,7 +95,7 @@ export interface ActivityItem {
 
 export default function TeacherConsole() {
   const router = useRouter();
-  const { t } = useLanguage();
+  const { t, lang: appLang, currentLanguage } = useLanguage();
   const [teacherName, setTeacherName] = useState("Mrs. Anita Sharma");
   const [teachingLang, setTeachingLang] = useState("en");
   const [grade, setGrade] = useState(2);
@@ -124,10 +127,34 @@ export default function TeacherConsole() {
   const [serverInput, setServerInput] = useState("");
   const [wsConnected, setWsConnected] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [showQRModal, setShowQRModal] = useState(false);
+  const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>("");
 
   useEffect(() => {
     activeSessionRef.current = activeSession;
   }, [activeSession]);
+
+  // Keep teaching language in sync with global language switcher
+  useEffect(() => {
+    if (appLang && appLang !== teachingLang) {
+      setTeachingLang(appLang as string);
+      try {
+        localStorage.setItem("user_lang", appLang);
+        if (currentLanguage) localStorage.setItem("user_lang_name", currentLanguage.name);
+      } catch {}
+    }
+  }, [appLang, currentLanguage, teachingLang]);
+
+  useEffect(() => {
+    const onLangEvt = (e: Event) => {
+      const detail = (e as CustomEvent).detail as string | undefined;
+      if (detail && detail !== teachingLang) {
+        setTeachingLang(detail);
+      }
+    };
+    window.addEventListener("vs-lang-change", onLangEvt as EventListener);
+    return () => window.removeEventListener("vs-lang-change", onLangEvt as EventListener);
+  }, [teachingLang]);
 
   // Setup WebSocket connection for a given session (auto-reconnecting)
   const initSessionWebSocket = useCallback((sessionId: string) => {
@@ -333,6 +360,34 @@ export default function TeacherConsole() {
     }
   };
 
+  const generateQRCode = useCallback(async () => {
+    if (!activeSession?.join_code || !serverUrl) return;
+    // Build join URL pointing at THIS frontend (hotspot IP) + edge server + class code.
+    // Student scans with camera app -> opens student page -> auto-fills server URL + code.
+    const frontendOrigin = typeof window !== "undefined" ? window.location.origin : "";
+    const joinUrl = `${frontendOrigin}/student?server=${encodeURIComponent(serverUrl)}&code=${activeSession.join_code}`;
+    try {
+      const QRCode = (await import("qrcode")).default;
+      const dataUrl = await QRCode.toDataURL(joinUrl, {
+        width: 256,
+        margin: 2,
+        color: { dark: "#0c1a2e", light: "#ffffff" },
+      });
+      setQrCodeDataUrl(dataUrl);
+    } catch (e) {
+      console.error("QR generation failed:", e);
+    }
+  }, [activeSession?.join_code, serverUrl]);
+
+  // Generate QR when session becomes active
+  useEffect(() => {
+    if (activeSession?.join_code && serverUrl) {
+      generateQRCode();
+    } else {
+      setQrCodeDataUrl("");
+    }
+  }, [generateQRCode]);
+
   const handleOpenClassroomsModal = async () => {
     setShowClassroomsModal(true);
     setIsLoadingClassrooms(true);
@@ -390,6 +445,8 @@ export default function TeacherConsole() {
       handleTriggerAiContent("FLASHCARD");
     } else if (lower.includes("worksheet") || lower.includes("वर्कशीट")) {
       handleTriggerAiContent("WORKSHEET");
+    } else if (lower.includes("generate game") || lower.includes("game") || lower.includes("खेल")) {
+      handleTriggerAiContent("GAME");
     }
 
     try {
@@ -519,7 +576,7 @@ export default function TeacherConsole() {
   };
 
   // Passes ALL broadcasted transcripts from the entire lesson
-  const handleTriggerAiContent = async (type: "QUIZ" | "FLASHCARD" | "WORKSHEET") => {
+  const handleTriggerAiContent = async (type: "QUIZ" | "FLASHCARD" | "WORKSHEET" | "GAME") => {
     if (!activeSession) return;
     setIsGenerating(true);
     setActionError(null);
@@ -726,10 +783,10 @@ export default function TeacherConsole() {
               <span className={`w-2 h-2 rounded-full ${serverOnline ? "bg-[var(--green)]" : serverOnline === false ? "bg-[var(--red)]" : "bg-[var(--amber)] animate-pulse"}`} />
               <span className="font-bold">
                 {serverDetecting
-                  ? "Searching for edge server on this network…"
+                  ? (t("searchingEdge") || "Searching for edge server on this network…")
                   : serverOnline
-                  ? `Connected to edge server · ${serverUrl}${activeSession ? (wsConnected ? " · WS live" : " · WS reconnecting…") : ""}`
-                  : `OFFLINE — using no fallback. Students will NOT receive quizzes/voice until connected. · ${serverUrl || "no server"}`}
+                  ? `${t("edgeConnected") || "Connected to edge server"} · ${serverUrl}${activeSession ? (wsConnected ? " · WS live" : " · WS reconnecting…") : ""}`
+                  : `${t("edgeOffline") || "OFFLINE — using no fallback."} · ${serverUrl || "no server"}`}
               </span>
             </div>
             <div className="flex items-center gap-2">
@@ -740,7 +797,7 @@ export default function TeacherConsole() {
                 }}
                 className="px-2.5 py-1 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--text-primary)] font-bold hover:opacity-90"
               >
-                Set server
+                {t("setServerBtn") || "Set server"}
               </button>
               <button
                 onClick={() => runServerDetect(true)}
@@ -748,7 +805,7 @@ export default function TeacherConsole() {
                 className="px-2.5 py-1 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--text-primary)] font-bold hover:opacity-90 disabled:opacity-50 flex items-center gap-1"
               >
                 <RefreshCw className={`w-3 h-3 ${serverDetecting ? "animate-spin" : ""}`} />
-                Retry
+                {t("retryBtn") || "Retry"}
               </button>
             </div>
           </div>
@@ -773,7 +830,7 @@ export default function TeacherConsole() {
                       {t("classCodeTitle") || "Class Join Code"}
                     </p>
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--green-tint)] text-[var(--green)] font-black">
-                      Active Class
+                      {t("activeClassBadge") || "Active Class"}
                     </span>
                   </div>
                   <p className="text-2xl font-black font-mono tracking-widest text-[var(--text-primary)]">
@@ -800,6 +857,14 @@ export default function TeacherConsole() {
                   )}
                 </button>
                 <button
+                  onClick={() => { generateQRCode(); setShowQRModal(true); }}
+                  className="px-4 py-2 rounded-xl bg-[var(--violet-tint)] hover:bg-[var(--violet)] hover:text-white text-[var(--violet)] border border-[var(--violet-tint)] text-xs font-bold flex items-center gap-1.5 transition shadow-2xs"
+                  title="Show QR code for students to scan & join"
+                >
+                  <QrCode className="w-3.5 h-3.5" />
+                  <span>{t("qrCode") || "QR"}</span>
+                </button>
+                <button
                   onClick={handleEndSession}
                   className="px-3 py-2 rounded-xl bg-[var(--red-tint)] hover:bg-red-200/50 border border-[var(--red-tint)] text-[var(--red)] text-xs font-bold flex items-center gap-1.5 transition"
                 >
@@ -810,7 +875,7 @@ export default function TeacherConsole() {
             </div>
           )}
 
-          {/* Broadcast Studio */}
+          {/* Broadcast Studio - Mic First Design */}
           <div className="vs-surface rounded-2xl overflow-hidden border border-[var(--border)] shadow-xs">
             <div className="px-5 py-3.5 border-b border-[var(--border-sub)] flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -819,64 +884,48 @@ export default function TeacherConsole() {
                   {t("broadcastToClass") || "Broadcast to Class"}
                 </h2>
               </div>
-              {isMicLive && <MicWaveform isSpeaking={true} className="ml-auto" />}
+              <div className="flex items-center gap-2">
+                {isMicLive && <MicWaveform isSpeaking={true} className="ml-auto" />}
+                {isMicLive && (
+                  <span className="text-[10px] font-bold text-[var(--red)] bg-[var(--red-tint)] px-2 py-0.5 rounded-full animate-pulse flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--red)] animate-ping" />
+                    {t("micLive") || "● LIVE"}
+                  </span>
+                )}
+              </div>
             </div>
 
-            <div className="p-4 sm:p-5 space-y-3.5">
-              <div className="flex flex-wrap sm:flex-nowrap gap-2.5 items-center">
-                <button
-                  onClick={handleToggleMic}
-                  disabled={!activeSession || isFlushing}
-                  title={isMicLive ? "Turn Mic OFF" : "Turn Mic ON"}
-                  className={`px-4 py-3 rounded-xl flex items-center gap-2 font-bold text-xs flex-shrink-0 transition active:scale-95 shadow-sm ${
-                    isMicLive
-                      ? "bg-red-600 hover:bg-red-700 text-white animate-pulse shadow-lg ring-4 ring-red-500/30"
-                      : isFlushing
-                      ? "bg-[var(--amber-tint)] text-[var(--amber)] border border-[var(--amber-tint)]"
-                      : "bg-[var(--surface-2)] text-[var(--text-primary)] hover:bg-[var(--brand-tint)] hover:text-[var(--brand-deep)] border border-[var(--border)]"
-                  }`}
-                >
-                  {isFlushing ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : isMicLive ? (
-                    <Mic className="w-4 h-4 text-white" />
-                  ) : (
-                    <MicOff className="w-4 h-4 text-[var(--text-muted)]" />
-                  )}
-                  <span>
-                    {isFlushing
-                      ? t("finishingTranslation") || "Finishing translation..."
-                      : isMicLive
-                      ? t("micOn") || "Mic ON"
-                      : t("micOff") || "Mic OFF"}
-                  </span>
-                </button>
-                <input
-                  type="text"
-                  value={speechText}
-                  onChange={(e) => setSpeechText(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleBroadcastSpeech()}
-                  placeholder={
-                    !activeSession
-                      ? "Start or join a class above to begin teaching…"
-                      : isMicLive
-                      ? "Mic is LIVE (continuous speech translation active)"
-                      : isFlushing
-                      ? t("finishingTranslation") || "Finishing translation for students..."
-                      : t("broadcastPlaceholder") || "Type or speak lesson text to broadcast to students…"
-                  }
-                  disabled={!activeSession || isMicLive || isFlushing}
-                  className="vs-input flex-1 px-4 py-3 rounded-xl text-sm font-medium disabled:opacity-60"
-                />
-                <button
-                  onClick={() => handleBroadcastSpeech()}
-                  disabled={!activeSession || !speechText.trim() || isMicLive || isFlushing}
-                  className="vs-btn-brand w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 active:scale-95 disabled:opacity-40"
-                  title="Broadcast speech"
-                >
-                  <Send className="w-4 h-4" />
-                </button>
-              </div>
+            <div className="p-4 sm:p-5 space-y-4">
+              {/* Main Mic Toggle - Large, Prominent */}
+              <button
+                onClick={handleToggleMic}
+                disabled={!activeSession || isFlushing}
+                className={`w-full py-5 sm:py-6 rounded-2xl flex items-center justify-center gap-3 font-bold text-sm transition active:scale-[0.98] shadow-lg ${
+                  isMicLive
+                    ? "bg-red-600 hover:bg-red-700 text-white animate-pulse shadow-xl ring-4 ring-red-500/20"
+                    : isFlushing
+                    ? "bg-[var(--amber-tint)] text-[var(--amber)] border-2 border-[var(--amber-tint)]"
+                    : "bg-gradient-to-r from-[var(--brand)] to-[var(--brand-deep)] text-[#0c1a2e] hover:from-[var(--brand-deep)] hover:to-[var(--brand)]"
+                }`}
+              >
+                {isFlushing ? (
+                  <>
+                    <Loader2 className="w-6 h-6 animate-spin" />
+                    <span className="text-base">{t("finishingTranslation") || "Finishing translation..."}</span>
+                  </>
+                ) : isMicLive ? (
+                  <>
+                    <Mic className="w-6 h-6" />
+                    <span className="text-base">{t("micOn") || "Mic ON — Listening"}</span>
+                    <span className="w-2 h-2 rounded-full bg-white/30 animate-ping" />
+                  </>
+                ) : (
+                  <>
+                    <MicOff className="w-6 h-6" />
+                    <span className="text-base">{t("micOff") || "Tap to Start Live Translation"}</span>
+                  </>
+                )}
+              </button>
 
               {micStatus && (
                 <div
@@ -893,19 +942,44 @@ export default function TeacherConsole() {
                 </div>
               )}
 
-              <div className="flex flex-wrap items-center gap-2 pt-1">
-                <span className="text-[11px] text-[var(--text-muted)] font-bold">{t("quickLabel") || "Quick:"}</span>
-                {quickSamples.map((s, i) => (
+              {/* Text Input - Only when mic is OFF */}
+              {!isMicLive && !isFlushing && activeSession && (
+                <div className="flex gap-2 pt-2 border-t border-[var(--border-sub)]">
+                  <input
+                    type="text"
+                    value={speechText}
+                    onChange={(e) => setSpeechText(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleBroadcastSpeech()}
+                    placeholder={t("broadcastPlaceholder") || "Type lesson text to translate & broadcast…"}
+                    className="vs-input flex-1 px-4 py-3 rounded-xl text-sm font-medium"
+                  />
                   <button
-                    key={i}
-                    onClick={() => handleBroadcastSpeech(s)}
-                    disabled={!activeSession}
-                    className="px-3 py-1.5 rounded-full bg-[var(--surface-2)] hover:bg-[var(--brand-tint)] hover:text-[var(--brand-deep)] border border-[var(--border)] text-[var(--text-secondary)] text-[11px] font-medium disabled:opacity-40 transition"
+                    onClick={() => handleBroadcastSpeech()}
+                    disabled={!speechText.trim()}
+                    className="vs-btn-brand w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 active:scale-95 disabled:opacity-40"
+                    title="Broadcast text"
                   >
-                    {s}
+                    <Send className="w-4 h-4" />
                   </button>
-                ))}
-              </div>
+                </div>
+              )}
+
+              {/* Quick Samples - Only when mic is OFF */}
+              {!isMicLive && !isFlushing && activeSession && (
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <span className="text-[11px] text-[var(--text-muted)] font-bold">{t("quickLabel") || "Quick:"}</span>
+                  {quickSamples.map((s, i) => (
+                    <button
+                      key={i}
+                      onClick={() => handleBroadcastSpeech(s)}
+                      disabled={!activeSession}
+                      className="px-3 py-1.5 rounded-full bg-[var(--surface-2)] hover:bg-[var(--brand-tint)] hover:text-[var(--brand-deep)] border border-[var(--border)] text-[var(--text-secondary)] text-[11px] font-medium disabled:opacity-40 transition"
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -969,12 +1043,16 @@ export default function TeacherConsole() {
                       {Object.keys(tItem.translations || {}).length > 0 && (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                           {Object.entries(tItem.translations || {})
-                            .filter(([trLang]) => ["hi", "sat", "en"].includes(trLang) && trLang !== (tItem.source_lang || teachingLang))
+                            .filter(([trLang]) => ["hi", "sat", "en", "bn", "mr", "ta", "te"].includes(trLang) && trLang !== (tItem.source_lang || teachingLang))
                             .map(([trLang, text]) => {
                               const pillMap: Record<string, string> = {
                                 hi: t("langPillHi"),
                                 sat: t("langPillSat"),
-                                en: t("langPillEn")
+                                en: t("langPillEn"),
+                                bn: t("langPillBn"),
+                                mr: t("langPillMr"),
+                                ta: t("langPillTa"),
+                                te: t("langPillTe"),
                               };
                               const label = pillMap[trLang] || trLang.toUpperCase();
                               return (
@@ -1073,7 +1151,7 @@ export default function TeacherConsole() {
             </div>
 
             <div className="p-4 space-y-4 flex-1 flex flex-col">
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-4 gap-2">
                 {[
                   {
                     type: "QUIZ" as const,
@@ -1089,6 +1167,11 @@ export default function TeacherConsole() {
                     type: "WORKSHEET" as const,
                     label: t("btnSheet") || "Sheet",
                     style: "bg-[var(--amber-tint)] text-[var(--amber)] border-[var(--amber-tint)]",
+                  },
+                  {
+                    type: "GAME" as const,
+                    label: t("gamesTab") || "Games",
+                    style: "bg-[var(--green-tint)] text-[var(--green)] border-[var(--green-tint)]",
                   },
                 ].map(({ type, label, style }) => (
                   <button
@@ -1124,6 +1207,14 @@ export default function TeacherConsole() {
                     visual?: string;
                   }>;
                   const tasks = (content.tasks || []) as Array<{ task: string; answer?: string }>;
+                  const games = (content.games || []) as Array<{
+                    id?: string;
+                    title: string;
+                    instruction?: string;
+                    visual?: string;
+                    options?: string[];
+                    correct?: string;
+                  }>;
 
                   return (
                     <div
@@ -1220,6 +1311,26 @@ export default function TeacherConsole() {
                                     Answer: {tItem.answer}
                                   </p>
                                 )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Lesson games */}
+                        {games.length > 0 && (
+                          <div className="space-y-1.5">
+                            {games.map((g, gIdx) => (
+                              <div
+                                key={g.id || gIdx}
+                                className="p-2 rounded-lg bg-[var(--surface-1)] border border-[var(--border)] text-xs flex items-center gap-2"
+                              >
+                                <span className="text-base">{g.visual || "🎮"}</span>
+                                <div className="overflow-hidden">
+                                  <p className="font-bold text-[var(--text-primary)] truncate">{g.title}</p>
+                                  {g.instruction && (
+                                    <p className="text-[10px] text-[var(--text-muted)] truncate">{g.instruction}</p>
+                                  )}
+                                </div>
                               </div>
                             ))}
                           </div>
@@ -1466,6 +1577,59 @@ export default function TeacherConsole() {
           </div>
         </div>
       )}
+
+      {/* ── QR Code Modal (hotspot join) ── */}
+      {showQRModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="vs-surface w-full max-w-sm rounded-3xl p-6 border border-[var(--border)] shadow-2xl space-y-4 text-center">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-extrabold text-[var(--text-primary)] flex items-center gap-2">
+                <QrCode className="w-5 h-5 text-[var(--violet)]" />
+                {t("qrCodeTitle") || "Scan to Join Class"}
+              </h3>
+              <button
+                onClick={() => setShowQRModal(false)}
+                className="p-1.5 rounded-xl hover:bg-[var(--surface-2)] text-[var(--text-secondary)] transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-[var(--text-muted)]">
+              1️⃣ Students join your hotspot/Wi-Fi ➁ Scan with camera app — server URL + class code auto-fill
+            </p>
+            <div className="p-4 bg-white rounded-2xl border border-[var(--border)] inline-block">
+              {qrCodeDataUrl ? (
+                <img src={qrCodeDataUrl} alt="Class QR Code" className="w-64 h-64 mx-auto" />
+              ) : (
+                <div className="w-64 h-64 mx-auto flex flex-col items-center justify-center gap-2 text-[var(--text-muted)]">
+                  <Loader2 className="w-6 h-6 animate-spin" />
+                  <span className="text-xs font-bold">Generating QR…</span>
+                </div>
+              )}
+            </div>
+            <div className="space-y-2 text-xs">
+              <div className="flex items-center justify-center gap-2 text-[var(--text-muted)]">
+                <span className="font-mono font-bold text-[var(--text-primary)]">{activeSession?.join_code}</span>
+                <span className="px-2 py-0.5 rounded bg-[var(--surface-2)]">{t("classCode") || "Code"}</span>
+              </div>
+              <div className="flex items-center justify-center gap-2 text-[var(--text-muted)]">
+                <Smartphone className="w-3.5 h-3.5" />
+                <span className="font-mono truncate max-w-[200px]">{serverUrl}</span>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowQRModal(false)}
+              className="w-full vs-btn-brand py-2.5 rounded-xl text-xs font-extrabold"
+            >
+              {t("close") || "Close"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <footer className="text-center py-3 text-[11px] text-[var(--text-muted)] font-medium">
+        {t("footerText")}
+      </footer>
     </div>
   );
 }

@@ -17,8 +17,31 @@ OL_CHIKI_TO_DEVANAGARI = {
     '\u1C55': '५', '\u1C56': '६', '\u1C57': '७', '\u1C58': '८', '\u1C59': '९',
 }
 
+OL_CHIKI_TO_ROMAN = {
+    '\u1C5A': 'o', '\u1C5F': 'a', '\u1C64': 'i', '\u1C69': 'u', '\u1C6E': 'e', '\u1C73': 'o',
+    '\u1C5B': 't', '\u1C5C': 'g', '\u1C5D': 'ng', '\u1C5E': 'l',
+    '\u1C60': 'k', '\u1C61': 'j', '\u1C62': 'm', '\u1C63': 'w',
+    '\u1C65': 's', '\u1C66': 'h', '\u1C67': 'ny', '\u1C68': 'r',
+    '\u1C6A': 'ch', '\u1C6B': 'd', '\u1C6C': 'n', '\u1C6D': 'y',
+    '\u1C6F': 'p', '\u1C70': 'd', '\u1C71': 'n', '\u1C72': 'r',
+    '\u1C74': 't', '\u1C75': 'b', '\u1C76': 'v', '\u1C77': 'h',
+    '\u1C78': 'n', '\u1C79': '',  '\u1C7A': '',  '\u1C7B': '',  '\u1C7C': '',  '\u1C7D': '',
+    '\u1C7E': '.', '\u1C7F': '.',
+    '\u1C50': '0', '\u1C51': '1', '\u1C52': '2', '\u1C53': '3', '\u1C54': '4',
+    '\u1C55': '5', '\u1C56': '6', '\u1C57': '7', '\u1C58': '8', '\u1C59': '9',
+}
+
 def transliterate_ol_chiki_to_devanagari(text: str) -> str:
     """Converts Santali Ol Chiki script into Devanagari script for Hindi Piper VITS."""
     if not text:
         return ""
     return "".join(OL_CHIKI_TO_DEVANAGARI.get(ch, ch) for ch in text)
+
+def transliterate_ol_chiki_to_roman(text: str) -> str:
+    """Fallback Roman phonetics when Devanagari would be empty or device lacks hi voice."""
+    if not text:
+        return ""
+    return "".join(OL_CHIKI_TO_ROMAN.get(ch, ch) for ch in text)
+
+def has_ol_chiki(text: str) -> bool:
+    return any('\u1c50' <= ch <= '\u1c7f' for ch in text)

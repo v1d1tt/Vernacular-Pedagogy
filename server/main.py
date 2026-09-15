@@ -143,11 +143,15 @@ def transcribe_audio_endpoint(req: TranscribeRequest):
 def tts_speak(text: str = "", lang: str = "hi", speed: float = 1.0):
     if not text or not text.strip():
         raise HTTPException(status_code=400, detail="Text parameter is required")
-    from ol_chiki import transliterate_ol_chiki_to_devanagari
+    from ol_chiki import transliterate_ol_chiki_to_devanagari, transliterate_ol_chiki_to_roman, has_ol_chiki
     clean_text = text.strip()
-    if lang == "sat" or any('\u1c50' <= ch <= '\u1c7f' for ch in clean_text):
+    if lang == "sat" or has_ol_chiki(clean_text):
         lang = "hi"
-        clean_text = transliterate_ol_chiki_to_devanagari(clean_text)
+        dev = transliterate_ol_chiki_to_devanagari(clean_text)
+        # If Devanagari transliteration would be empty (only modifiers), fall back to Roman phonetics
+        clean_text = dev.strip() if dev.strip() else transliterate_ol_chiki_to_roman(clean_text)
+        if not clean_text.strip():
+            clean_text = transliterate_ol_chiki_to_roman(text.strip())
     wav_bytes = edge_ai.synthesize_speech(clean_text, language=lang, speed=speed)
     if not wav_bytes:
         raise HTTPException(status_code=500, detail="Speech synthesis failed or model not ready")
@@ -419,11 +423,12 @@ def join_session(session_id: str, req: JoinSessionRequest):
 # Speech Translation Broadcast
 @app.post("/api/speech/broadcast")
 async def broadcast_speech(req: BroadcastSpeechRequest):
-    # Main 3 working languages: Hindi (hi), Santali (sat), English (en)
-    # Target only the remaining languages (excluding original source language)
-    target_languages = [l for l in ["hi", "sat", "en"] if l != req.source_lang]
+    # All classroom languages: hi, sat, en, bn, mr, ta, te
+    # Fan-out to every language except the source (covers bn/mr/ta/te students)
+    ALL_LANGS = ["hi", "sat", "en", "bn", "mr", "ta", "te"]
+    target_languages = [l for l in ALL_LANGS if l != req.source_lang]
     if not target_languages:
-        target_languages = ["hi", "sat", "en"]
+        target_languages = ALL_LANGS
 
     # Perform Fan-Out Translation
     translation_result = translate_speech(req.original_text, req.source_lang, target_languages)
@@ -487,9 +492,10 @@ async def process_stream_chunk(req: StreamChunkRequest):
         
         text = asr_res.get("text", "").strip()
         if text:
-            target_languages = [l for l in ["hi", "sat", "en"] if l != req.source_lang]
+            ALL_LANGS = ["hi", "sat", "en", "bn", "mr", "ta", "te"]
+            target_languages = [l for l in ALL_LANGS if l != req.source_lang]
             if not target_languages:
-                target_languages = ["hi", "sat", "en"]
+                target_languages = ALL_LANGS
 
             tr_res = translate_speech(text, req.source_lang, target_languages)
             now = time.time()

@@ -26,19 +26,53 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     try {
-      const saved = localStorage.getItem("vs-app-lang") as LanguageCode | null;
+      const savedVs = localStorage.getItem("vs-app-lang") as LanguageCode | null;
+      const savedUser = localStorage.getItem("user_lang") as LanguageCode | null;
+      const saved = savedVs || savedUser;
       if (saved && APP_LANGUAGES.some((l) => l.code === saved)) {
         setLangState(saved);
+        // ensure both keys are in sync on load
+        try {
+          localStorage.setItem("vs-app-lang", saved);
+          // keep user_lang in sync only if it was already set (preserve onboarding flow)
+          if (savedUser && savedUser !== saved) localStorage.setItem("user_lang", saved);
+        } catch {}
       }
     } catch {
       // localStorage not accessible
     }
+
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "vs-app-lang" || e.key === "user_lang") {
+        const val = (e.newValue as LanguageCode | null);
+        if (val && APP_LANGUAGES.some((l) => l.code === val)) {
+          setLangState(val);
+        }
+      }
+    };
+    const onCustom = (e: Event) => {
+      const detail = (e as CustomEvent).detail as LanguageCode | undefined;
+      if (detail && APP_LANGUAGES.some((l) => l.code === detail)) {
+        setLangState(detail);
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("vs-lang-change", onCustom as EventListener);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("vs-lang-change", onCustom as EventListener);
+    };
   }, []);
 
   const setLang = useCallback((newLang: LanguageCode) => {
     setLangState(newLang);
     try {
       localStorage.setItem("vs-app-lang", newLang);
+      localStorage.setItem("user_lang", newLang);
+      const found = APP_LANGUAGES.find((l) => l.code === newLang);
+      if (found) localStorage.setItem("user_lang_name", found.name);
+      // notify all tabs / components that bypass React context (studentLang local state)
+      window.dispatchEvent(new CustomEvent("vs-lang-change", { detail: newLang }));
     } catch {
       // ignore
     }

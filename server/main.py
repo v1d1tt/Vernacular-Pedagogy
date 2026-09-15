@@ -395,24 +395,25 @@ async def reactivate_session(session_id: str):
 def join_session(session_id: str, req: JoinSessionRequest):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM sessions WHERE id = ? AND is_active = 1", (session_id,))
+    cursor.execute("SELECT * FROM sessions WHERE (id = ? OR UPPER(join_code) = ?) AND is_active = 1", (session_id, session_id.strip().upper()))
     session = cursor.fetchone()
     if not session:
         conn.close()
         raise HTTPException(status_code=404, detail="Active session not found")
 
+    real_session_id = session["id"]
     participant_id = str(uuid.uuid4())[:8]
     now = time.time()
     cursor.execute('''
     INSERT INTO participants (id, session_id, student_id, student_name, preferred_language, raised_hand, can_speak, joined_at)
     VALUES (?, ?, ?, ?, ?, 0, 0, ?)
-    ''', (participant_id, session_id, req.student_id, req.student_name, req.preferred_language, now))
+    ''', (participant_id, real_session_id, req.student_id, req.student_name, req.preferred_language, now))
     conn.commit()
     conn.close()
 
     return {
         "participant_id": participant_id,
-        "session_id": session_id,
+        "session_id": real_session_id,
         "student_name": req.student_name,
         "preferred_language": req.preferred_language,
         "course_name": session["course_name"],

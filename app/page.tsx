@@ -848,26 +848,28 @@ export default function VaaniSetuOnboarding() {
         </div>
       )}
 
-      {/* Language Dump entry */}
-      <div className="max-w-2xl mx-auto w-full px-4 pb-2">
-        <button
-          onClick={() => router.push("/language-dump")}
-          className="w-full vs-surface rounded-2xl p-4 border border-[var(--border)] flex items-center gap-3 text-left hover:border-[var(--brand)] transition active:scale-[0.99]"
-        >
-          <div className="w-10 h-10 rounded-xl bg-[var(--brand-tint)] flex items-center justify-center text-xl shrink-0">
-            🌍
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-extrabold text-[var(--text-primary)]">
-              {t("dumpEntryTitle", "Language Dump — add your language")}
-            </p>
-            <p className="text-[11px] text-[var(--text-muted)] truncate">
-              {t("dumpEntrySub", "Record words & sentences, export the bundle for developers")}
-            </p>
-          </div>
-          <span className="text-[var(--text-muted)] font-black">→</span>
-        </button>
-      </div>
+      {/* Language Dump entry — only visible on Language Selection step */}
+      {step === 1 && (
+        <div className="max-w-2xl mx-auto w-full px-4 pb-2">
+          <button
+            onClick={() => router.push("/language-dump")}
+            className="w-full vs-surface rounded-2xl p-4 border border-[var(--border)] flex items-center gap-3 text-left hover:border-[var(--brand)] transition active:scale-[0.99]"
+          >
+            <div className="w-10 h-10 rounded-xl bg-[var(--brand-tint)] flex items-center justify-center text-xl shrink-0">
+              🌍
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-extrabold text-[var(--text-primary)]">
+                {t("dumpEntryTitle", "Language Dump — add your language")}
+              </p>
+              <p className="text-[11px] text-[var(--text-muted)] truncate">
+                {t("dumpEntrySub", "Record words & sentences, export the bundle for developers")}
+              </p>
+            </div>
+            <span className="text-[var(--text-muted)] font-black">→</span>
+          </button>
+        </div>
+      )}
 
       <footer className="text-center py-4 text-[11px] text-[var(--text-muted)] font-medium">
         {t("footerText")}

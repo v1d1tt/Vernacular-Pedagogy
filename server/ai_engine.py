@@ -225,12 +225,13 @@ def transcribe_audio_chunk(audio_array: np.ndarray, sample_rate: int = 16000, la
         "detected_command": voice_cmd
     }
 
-def translate_speech(original_text: str, source_lang: str, target_languages: List[str]) -> Dict[str, Any]:
+def translate_speech(original_text: str, source_lang: str, target_languages: List[str], start_time: Optional[float] = None) -> Dict[str, Any]:
     """
     Translates classroom speech from source language to target student languages.
     Uses native phrase mappings and IndicTrans2 runtime.
+    Calculates actual end-to-end execution latency in seconds.
     """
-    start_time = time.time()
+    t_start = start_time if start_time is not None else time.time()
     translations: Dict[str, str] = {}
     clean_text = original_text.strip()
 
@@ -264,8 +265,8 @@ def translate_speech(original_text: str, source_lang: str, target_languages: Lis
                 translations[tgt] = translate_activity_item(clean_text, tgt)
 
     # Calculate real TTFA (actual execution latency in seconds)
-    elapsed = time.time() - start_time
-    ttfa = round(max(0.01, elapsed), 2)
+    elapsed = time.time() - t_start
+    ttfa = round(max(0.03, elapsed), 2)
 
     return {
         "source_lang": source_lang,

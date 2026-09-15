@@ -424,6 +424,7 @@ def join_session(session_id: str, req: JoinSessionRequest):
 # Speech Translation Broadcast
 @app.post("/api/speech/broadcast")
 async def broadcast_speech(req: BroadcastSpeechRequest):
+    req_t_start = time.time()
     # All classroom languages: hi, sat, en, bn, mr, ta, te
     # Fan-out to every language except the source (covers bn/mr/ta/te students)
     ALL_LANGS = ["hi", "sat", "en", "bn", "mr", "ta", "te"]
@@ -432,7 +433,7 @@ async def broadcast_speech(req: BroadcastSpeechRequest):
         target_languages = ALL_LANGS
 
     # Perform Fan-Out Translation
-    translation_result = translate_speech(req.original_text, req.source_lang, target_languages)
+    translation_result = translate_speech(req.original_text, req.source_lang, target_languages, start_time=req_t_start)
     
     now = time.time()
     conn = get_db_connection()
@@ -474,6 +475,7 @@ async def update_mic_state(req: TeacherMicStateRequest):
 
 @app.post("/api/speech/stream-chunk")
 async def process_stream_chunk(req: StreamChunkRequest):
+    chunk_t_start = time.time()
     import base64
     import numpy as np
 
@@ -498,7 +500,7 @@ async def process_stream_chunk(req: StreamChunkRequest):
             if not target_languages:
                 target_languages = ALL_LANGS
 
-            tr_res = translate_speech(text, req.source_lang, target_languages)
+            tr_res = translate_speech(text, req.source_lang, target_languages, start_time=chunk_t_start)
             now = time.time()
             conn = get_db_connection()
             cursor = conn.cursor()

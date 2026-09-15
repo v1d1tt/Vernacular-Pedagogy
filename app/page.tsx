@@ -11,7 +11,7 @@ import {
   Check, User, GraduationCap, Globe, ArrowRight,
   Wifi, School, Eye, EyeOff, AlertCircle
 } from "lucide-react";
-import { LanguageCode } from "@/lib/translations";
+import { LanguageCode, TRANSLATIONS } from "@/lib/translations";
 import { Mascot } from "@/components/mascot";
 
 type TeacherAuthMode = "login" | "signup";
@@ -19,6 +19,13 @@ type TeacherAuthMode = "login" | "signup";
 export default function VaaniSetuOnboarding() {
   const router = useRouter();
   const { lang, setLang, t } = useLanguage();
+
+  const tDump = (key: string, fallback: string) => {
+    if (lang === "hi") {
+      return TRANSLATIONS.hi[key] || fallback;
+    }
+    return TRANSLATIONS.en[key] || fallback;
+  };
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [selectedRole, setSelectedRole] = useState<"student" | "teacher">("teacher");
@@ -860,10 +867,10 @@ export default function VaaniSetuOnboarding() {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-extrabold text-[var(--text-primary)]">
-                {t("dumpEntryTitle", "Language Dump — add your language")}
+                {tDump("dumpEntryTitle", "Language Dump — add your language")}
               </p>
               <p className="text-[11px] text-[var(--text-muted)] truncate">
-                {t("dumpEntrySub", "Record words & sentences, export the bundle for developers")}
+                {tDump("dumpEntrySub", "Record words & sentences, export the bundle for developers")}
               </p>
             </div>
             <span className="text-[var(--text-muted)] font-black">→</span>

@@ -6,6 +6,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { LanguageSwitch } from "@/components/language-switch";
 import { useLanguage } from "@/components/language-provider";
 import { AudioRecorder } from "@/lib/audio-recorder";
+import { TRANSLATIONS } from "@/lib/translations";
 import {
   DUMP_PROMPTS,
   DumpRecordings,
@@ -31,7 +32,15 @@ const recordingsKey = (code: string) => `langdump-rec-${code.trim().toLowerCase(
 
 export default function LanguageDumpPage() {
   const router = useRouter();
-  const { t } = useLanguage();
+  const { lang } = useLanguage();
+
+  const tdump = (key: string, fallback: string) => {
+    if (lang === "hi") {
+      return TRANSLATIONS.hi[key] || fallback;
+    }
+    return TRANSLATIONS.en[key] || fallback;
+  };
+
   const [langName, setLangName] = useState("");
   const [langCode, setLangCode] = useState("");
   const [contributor, setContributor] = useState("");
@@ -89,7 +98,7 @@ export default function LanguageDumpPage() {
       setStorageError(null);
     } catch {
       setStorageError(
-        t("dumpStorageFull", "Phone storage is full — export your progress below, then clear to continue.")
+        tdump("dumpStorageFull", "Phone storage is full — export your progress below, then clear to continue.")
       );
     }
   };
@@ -122,7 +131,7 @@ export default function LanguageDumpPage() {
       setActivePrompt(promptId);
       setStorageError(null);
     } catch {
-      setStorageError(t("dumpMicError", "Could not access the microphone. Allow mic access and retry."));
+      setStorageError(tdump("dumpMicError", "Could not access the microphone. Allow mic access and retry."));
     }
   };
 
@@ -161,7 +170,7 @@ export default function LanguageDumpPage() {
   };
 
   const clearAll = () => {
-    if (!confirm(t("dumpClearConfirm", "Delete all recordings for this language? Export first!"))) return;
+    if (!confirm(tdump("dumpClearConfirm", "Delete all recordings for this language? Export first!"))) return;
     setRecordings({});
     try {
       localStorage.removeItem(recordingsKey(langCode));
@@ -169,6 +178,18 @@ export default function LanguageDumpPage() {
   };
 
   const categories = ["Greetings", "Classroom", "Numbers", "Words", "School"] as const;
+
+  const getCategoryTitle = (cat: string) => {
+    const keyMap: Record<string, string> = {
+      Greetings: "dumpCatGreetings",
+      Classroom: "dumpCatClassroom",
+      Numbers: "dumpCatNumbers",
+      Words: "dumpCatWords",
+      School: "dumpCatSchool",
+    };
+    const key = keyMap[cat];
+    return key ? tdump(key, cat) : cat;
+  };
 
   return (
     <div className="min-h-screen vs-bg flex flex-col">
@@ -182,7 +203,7 @@ export default function LanguageDumpPage() {
           </button>
           <span className="font-extrabold vs-text text-lg tracking-tight flex items-center gap-1.5">
             <Globe className="w-5 h-5 text-[var(--brand)]" />
-            {t("dumpTitle", "Language Dump")}
+            {tdump("dumpTitle", "Language Dump")}
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -194,10 +215,10 @@ export default function LanguageDumpPage() {
       <main className="flex-1 max-w-2xl mx-auto w-full px-4 py-6 space-y-5">
         <div className="vs-surface rounded-3xl p-6 space-y-2 border border-[var(--border)]">
           <h1 className="text-xl font-extrabold text-[var(--text-primary)]">
-            {t("dumpHeading", "🌍 Add a new language")}
+            {tdump("dumpHeading", "🌍 Add a new language")}
           </h1>
           <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-            {t(
+            {tdump(
               "dumpSub",
               "Missing your language? Read each prompt aloud and record it. Export the bundle and send it to the developers — that is what a new language implementation is built from (UI text, voice, and translation data)."
             )}
@@ -206,26 +227,26 @@ export default function LanguageDumpPage() {
             <input
               value={langName}
               onChange={(e) => setLangName(e.target.value)}
-              placeholder={t("dumpLangName", "Language name (e.g. Ho)")}
+              placeholder={tdump("dumpLangName", "Language name (e.g. Ho)")}
               className="vs-input px-3 py-2.5 rounded-xl text-sm font-medium"
             />
             <input
               value={langCode}
               onChange={(e) => setLangCode(e.target.value.toLowerCase().replace(/[^a-z]/g, "").slice(0, 5))}
-              placeholder={t("dumpLangCode", "Code (e.g. hoc)")}
+              placeholder={tdump("dumpLangCode", "Code (e.g. hoc)")}
               className="vs-input px-3 py-2.5 rounded-xl text-sm font-medium font-mono"
             />
             <input
               value={contributor}
               onChange={(e) => setContributor(e.target.value)}
-              placeholder={t("dumpYourName", "Your name")}
+              placeholder={tdump("dumpYourName", "Your name")}
               className="vs-input px-3 py-2.5 rounded-xl text-sm font-medium"
             />
           </div>
           <div className="pt-1">
             <div className="flex items-center justify-between text-xs font-bold text-[var(--text-secondary)] mb-1">
               <span>
-                {doneCount}/{DUMP_PROMPTS.length} {t("dumpRecorded", "recorded")}
+                {doneCount}/{DUMP_PROMPTS.length} {tdump("dumpRecorded", "recorded")}
               </span>
               <span>{pct}%</span>
             </div>
@@ -248,13 +269,13 @@ export default function LanguageDumpPage() {
               className="flex-1 vs-btn-brand py-3 rounded-xl text-sm font-extrabold flex items-center justify-center gap-2 disabled:opacity-50"
             >
               <Download className="w-4 h-4" />
-              {t("dumpExport", "Export bundle")} ({doneCount})
+              {tdump("dumpExport", "Export bundle")} ({doneCount})
             </button>
             <button
               onClick={clearAll}
               disabled={doneCount === 0}
               className="px-4 py-3 rounded-xl bg-[var(--red-tint)] text-[var(--red)] text-sm font-bold disabled:opacity-50"
-              title={t("dumpClear", "Delete all")}
+              title={tdump("dumpClear", "Delete all")}
             >
               <Trash2 className="w-4 h-4" />
             </button>
@@ -264,7 +285,7 @@ export default function LanguageDumpPage() {
         {categories.map((cat) => (
           <div key={cat} className="space-y-2">
             <h2 className="text-xs font-black uppercase tracking-widest text-[var(--text-muted)] px-1">
-              {cat} · {DUMP_PROMPTS.filter((p) => p.category === cat && recordings[p.id]).length}/
+              {getCategoryTitle(cat)} · {DUMP_PROMPTS.filter((p) => p.category === cat && recordings[p.id]).length}/
               {DUMP_PROMPTS.filter((p) => p.category === cat).length}
             </h2>
             {DUMP_PROMPTS.filter((p) => p.category === cat).map((p) => {
@@ -307,12 +328,12 @@ export default function LanguageDumpPage() {
                     {isActive ? (
                       <>
                         <Square className="w-3.5 h-3.5 fill-current" />
-                        {playingPrompt === p.id ? "…" : t("dumpStop", "Stop")}
+                        {playingPrompt === p.id ? "…" : tdump("dumpStop", "Stop")}
                       </>
                     ) : (
                       <>
                         <Mic className="w-3.5 h-3.5" />
-                        {rec ? t("dumpRedo", "Redo") : t("dumpRecord", "Record")}
+                        {rec ? tdump("dumpRedo", "Redo") : tdump("dumpRecord", "Record")}
                       </>
                     )}
                   </button>
@@ -324,10 +345,10 @@ export default function LanguageDumpPage() {
 
         <div className="vs-surface rounded-2xl p-4 border border-[var(--border)] text-[11px] text-[var(--text-secondary)] leading-relaxed">
           <p className="font-bold text-[var(--text-primary)] mb-1">
-            {t("dumpDevTitle", "For developers — turning a bundle into a language:")}
+            {tdump("dumpDevTitle", "For developers — turning a bundle into a language:")}
           </p>
           <p>
-            {t(
+            {tdump(
               "dumpDevBody",
               "1) Transcribe recordings into TRANSLATIONS entries (lib/translations.ts). 2) Add a script transliterator if needed (lib/ol-chiki.ts pattern) for TTS. 3) Fine-tune/extend IndicTrans + ASR with the audio pairs. 4) Register the code in APP_LANGUAGES + edge LANGUAGES."
             )}
@@ -336,8 +357,9 @@ export default function LanguageDumpPage() {
       </main>
 
       <footer className="text-center py-4 text-[11px] text-[var(--text-muted)] font-medium">
-        {t("footerText")}
+        {tdump("footerText", "वाणीSetu · Classes 1–3 · Works without internet")}
       </footer>
     </div>
   );
 }
+

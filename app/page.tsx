@@ -12,6 +12,7 @@ import {
   Wifi, School, Eye, EyeOff, AlertCircle
 } from "lucide-react";
 import { LanguageCode } from "@/lib/translations";
+import { LottieAnimation } from "@/components/lottie-animation";
 
 type TeacherAuthMode = "login" | "signup";
 
@@ -297,6 +298,20 @@ export default function VaaniSetuOnboarding() {
       <main className="flex-1 flex items-center justify-center px-4 py-6">
         <div className="w-full max-w-2xl space-y-6">
 
+          {/* ── Mascot animation — visible on Step 1 only ── */}
+          {step === 1 && (
+            <div className="flex flex-col items-center gap-1 animate-fadeIn">
+              <LottieAnimation
+                src="/animations/education.lottie"
+                label="Education mascot"
+                className="w-44 h-44 sm:w-52 sm:h-52 drop-shadow-lg"
+              />
+              <p className="text-xs font-semibold text-[var(--text-muted)] tracking-wide">
+                {t("appName")}
+              </p>
+            </div>
+          )}
+
           {/* Edge-server status — both devices must show Connected to the SAME URL */}
           <div
             className={`p-3 rounded-2xl border text-xs font-medium flex flex-wrap items-center justify-between gap-2 ${
@@ -465,31 +480,47 @@ export default function VaaniSetuOnboarding() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* Teacher — no badge label */}
+                {/* Teacher — Lottie owl character */}
                 <button id="btn-role-teacher" onClick={() => handleSelectRole("teacher")}
-                  className="p-6 rounded-3xl border-2 border-[var(--border)] bg-[var(--surface-2)] hover:border-[var(--brand)] hover:bg-[var(--brand-tint)] transition-all text-left space-y-4 group">
-                  <div className="w-12 h-12 rounded-2xl bg-[var(--brand-tint)] group-hover:bg-[var(--brand)] text-[var(--brand-deep)] group-hover:text-[#0c1a2e] flex items-center justify-center transition">
-                    <User className="w-6 h-6" />
+                  className="p-6 rounded-3xl border-2 border-[var(--border)] bg-[var(--surface-2)] hover:border-[var(--brand)] hover:bg-[var(--brand-tint)] transition-all text-left space-y-3 group">
+                  {/* Character animation */}
+                  <div className="flex justify-center">
+                    <LottieAnimation
+                      src="/animations/owlhi.json"
+                      label="Teacher character"
+                      className="w-24 h-24"
+                    />
                   </div>
-                  <div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-xl bg-[var(--brand-tint)] group-hover:bg-[var(--brand)] text-[var(--brand-deep)] group-hover:text-[#0c1a2e] flex items-center justify-center transition shrink-0">
+                      <User className="w-4 h-4" />
+                    </div>
                     <h3 className="text-xl font-extrabold text-[var(--text-primary)]">{t("roleTeacher")}</h3>
-                    <p className="text-xs text-[var(--text-secondary)] mt-1 leading-relaxed">{t("teacherRoleDesc")}</p>
                   </div>
+                  <p className="text-xs text-[var(--text-secondary)] leading-relaxed">{t("teacherRoleDesc")}</p>
                   <div className="text-xs font-bold text-[var(--brand-deep)] flex items-center gap-1 group-hover:translate-x-1 transition">
                     {t("teacherLoginTab")} / {t("teacherSignupTab")} <ArrowRight className="w-3.5 h-3.5" />
                   </div>
                 </button>
 
-                {/* Student — no badge label */}
+                {/* Student — Lottie blinking owl character */}
                 <button id="btn-role-student" onClick={() => handleSelectRole("student")}
-                  className="p-6 rounded-3xl border-2 border-[var(--border)] bg-[var(--surface-2)] hover:border-[var(--green)] hover:bg-[var(--green-tint)] transition-all text-left space-y-4 group">
-                  <div className="w-12 h-12 rounded-2xl bg-[var(--green-tint)] group-hover:bg-[var(--green)] text-[var(--green)] group-hover:text-white flex items-center justify-center transition">
-                    <GraduationCap className="w-6 h-6" />
+                  className="p-6 rounded-3xl border-2 border-[var(--border)] bg-[var(--surface-2)] hover:border-[var(--green)] hover:bg-[var(--green-tint)] transition-all text-left space-y-3 group">
+                  {/* Character animation */}
+                  <div className="flex justify-center">
+                    <LottieAnimation
+                      src="/animations/blue-owl-blinking.json"
+                      label="Student character"
+                      className="w-24 h-24"
+                    />
                   </div>
-                  <div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-xl bg-[var(--green-tint)] group-hover:bg-[var(--green)] text-[var(--green)] group-hover:text-white flex items-center justify-center transition shrink-0">
+                      <GraduationCap className="w-4 h-4" />
+                    </div>
                     <h3 className="text-xl font-extrabold text-[var(--text-primary)]">{t("roleStudent")}</h3>
-                    <p className="text-xs text-[var(--text-secondary)] mt-1 leading-relaxed">{t("studentRoleDesc")}</p>
                   </div>
+                  <p className="text-xs text-[var(--text-secondary)] leading-relaxed">{t("studentRoleDesc")}</p>
                   <div className="text-xs font-bold text-[var(--green)] flex items-center gap-1 group-hover:translate-x-1 transition">
                     {t("studentRegTitle")} <ArrowRight className="w-3.5 h-3.5" />
                   </div>

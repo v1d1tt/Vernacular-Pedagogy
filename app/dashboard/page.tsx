@@ -1,5 +1,6 @@
 import React from 'react';
 import { Globe, Upload, Zap, FileText, Video } from 'lucide-react';
+import { LottieAnimation } from "@/components/lottie-animation";
 
 const Dashboard = () => {
   const features = [
@@ -27,7 +28,13 @@ const Dashboard = () => {
     <div className="min-h-screen bg-gradient-to-br from-white via-blue-50 to-purple-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         {/* Header */}
-        <div className="text-center mb-16">
+        <div className="text-center mb-16 flex flex-col items-center">
+          <LottieAnimation
+            src="/animations/smart-owl.lottie"
+            label="Smart Owl Mascot"
+            className="w-32 h-32 mb-4"
+            style={{ filter: "hue-rotate(170deg) saturate(1.3) brightness(1.1)" }}
+          />
           <h1 className="text-4xl font-bold mb-4">
             <span className="text-blue-900">Your content,</span>
             <span className="text-blue-400"> always translated perfectly</span>

@@ -37,6 +37,7 @@ import {
   X,
 } from "lucide-react";
 import { MicWaveform } from "@/components/mic-waveform";
+import { LottieAnimation } from "@/components/lottie-animation";
 import { prepareTtsText } from "@/lib/ol-chiki";
 
 export interface StudentActivity {
@@ -177,6 +178,7 @@ export default function StudentConsole() {
   const [activeTab, setActiveTab] = useState<"LISTEN" | "QUIZ" | "WORKSHEET" | "FLASHCARDS" | "GAMES">("LISTEN");
   const [gameScore, setGameScore] = useState<number>(0);
   const [activeGameIndex, setActiveGameIndex] = useState<number>(0);
+  const [selectedGameAnswers, setSelectedGameAnswers] = useState<Record<number, string>>({});
 
   // Teacher speech in teacher's language
   const [teacherSpeech, setTeacherSpeech] = useState(
@@ -967,13 +969,22 @@ export default function StudentConsole() {
               </p>
 
               {/* In Student's Language */}
-              <div className="p-4 rounded-xl bg-[var(--brand-tint)]/40 border border-[var(--brand-tint2)] space-y-2">
+              <div className="p-4 rounded-xl bg-[var(--brand-tint)]/40 border border-[var(--brand-tint2)] space-y-3">
+                {/* Sound Recognition Mascot — appears only while audio plays */}
+                {isPlayingAudio && (
+                  <div className="flex items-center justify-center py-2">
+                    <LottieAnimation
+                      src="/animations/sound-recognization.lottie"
+                      label="Sound recognition waves"
+                      className="w-32 h-16 opacity-80"
+                    />
+                  </div>
+                )}
                 <div className="flex items-center justify-between text-xs font-bold text-[var(--brand-deep)]">
                   <span className="flex items-center gap-1.5">
                     <Globe className="w-3.5 h-3.5" />
                     <span>In your language ({studentLangName})</span>
                   </span>
-                  {isPlayingAudio && <MicWaveform isSpeaking={true} />}
                 </div>
                 <p className="text-xl font-extrabold text-[var(--text-primary)] leading-relaxed">
                   &ldquo;{translatedSpeech}&rdquo;
@@ -1006,8 +1017,13 @@ export default function StudentConsole() {
 
             {/* Speaking Options Card (Hand Raise Required) */}
             <div className="vs-surface rounded-2xl p-5 border border-[var(--border)] shadow-xs space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex items-start justify-between">
                 <div>
+                  <LottieAnimation
+                    src="/animations/question.json"
+                    label="Question"
+                    className="w-24 h-24 -ml-4 -mt-4 mb-2"
+                  />
                   <h3 className="text-sm font-bold text-[var(--text-primary)]">
                     {t("wantToSpeak") || "Ask or Speak to Teacher"}
                   </h3>
@@ -1073,10 +1089,12 @@ export default function StudentConsole() {
               );
               if (quizList.length === 0) {
                 return (
-                  <div className="vs-surface rounded-2xl p-10 text-center space-y-4 border border-[var(--border)]">
-                    <div className="w-14 h-14 rounded-2xl bg-[var(--brand-tint)] flex items-center justify-center mx-auto">
-                      <HelpCircle className="w-7 h-7 text-[var(--brand)]" />
-                    </div>
+                  <div className="vs-surface rounded-2xl p-8 text-center space-y-3 border border-[var(--border)]">
+                    <LottieAnimation
+                      src="/animations/question.json"
+                      label="No quiz yet"
+                      className="w-36 h-36 mx-auto"
+                    />
                     <div>
                       <p className="text-sm font-bold text-[var(--text-secondary)]">
                         {t("noQuizYet") || "No quiz assigned yet"}
@@ -1218,10 +1236,12 @@ export default function StudentConsole() {
               );
               if (worksheetList.length === 0) {
                 return (
-                  <div className="vs-surface rounded-2xl p-10 text-center space-y-4 border border-[var(--border)]">
-                    <div className="w-14 h-14 rounded-2xl bg-[var(--brand-tint)] flex items-center justify-center mx-auto">
-                      <BookOpen className="w-7 h-7 text-[var(--brand)]" />
-                    </div>
+                  <div className="vs-surface rounded-2xl p-8 text-center space-y-3 border border-[var(--border)]">
+                    <LottieAnimation
+                      src="/animations/learning.json"
+                      label="No worksheet yet"
+                      className="w-36 h-36 mx-auto"
+                    />
                     <div>
                       <p className="text-sm font-bold text-[var(--text-secondary)]">No Worksheet Available</p>
                       <p className="text-xs text-[var(--text-muted)] mt-1">
@@ -1293,6 +1313,14 @@ export default function StudentConsole() {
         {/* FLASHCARDS TAB */}
         {activeTab === "FLASHCARDS" && (
           <div className="space-y-4">
+            <div className="flex justify-center mb-2">
+              <LottieAnimation
+                src="/animations/smart-owl.lottie"
+                label="Smart Owl Mascot"
+                className="w-32 h-32"
+                style={{ filter: "hue-rotate(170deg) saturate(1.3) brightness(1.1)" }}
+              />
+            </div>
             {(() => {
               const cardActivities = activities.filter(
                 (a) => a.activity_type === "FLASHCARD" || Boolean((a.content as Record<string, unknown>)?.cards)
@@ -1477,20 +1505,27 @@ export default function StudentConsole() {
                     <Volume2 className="w-4 h-4" /> {t("listenAudio")}
                   </button>
                   <div className="grid grid-cols-4 gap-2 pt-2">
-                    {["2", "3", "4", "5"].map((num) => (
+                    {["2", "3", "4", "5"].map((num) => {
+                      const isSelected = selectedGameAnswers[0] === num;
+                      return (
                       <button
                         key={num}
                         onClick={() => {
+                          setSelectedGameAnswers((prev) => ({ ...prev, [0]: num }));
                           if (num === "4") {
                             setGameScore((s) => s + 10);
                             playSyntheticAudio(studentLang === "sat" ? "ᱥᱟᱹᱨᱤ ᱜᱮ! ᱯᱩᱱᱭᱟᱹ" : studentLang === "hi" ? "सही जवाब! चार" : "Correct! Four", studentLang);
                           }
                         }}
-                        className="py-4 rounded-xl bg-[var(--surface-2)] border-2 border-[var(--border)] hover:border-[var(--brand)] text-xl font-bold text-[var(--text-primary)] transition active:scale-95"
+                        className={`py-4 rounded-xl border-2 transition active:scale-95 text-xl font-bold ${
+                          isSelected
+                            ? "bg-[var(--brand-tint)] border-[var(--brand)] text-[var(--brand-deep)]"
+                            : "bg-[var(--surface-2)] border-[var(--border)] hover:border-[var(--brand)] text-[var(--text-primary)]"
+                        }`}
                       >
                         {num}
                       </button>
-                    ))}
+                    )})}
                   </div>
                 </div>
               )}
@@ -1516,20 +1551,27 @@ export default function StudentConsole() {
                     {studentLang === "sat" ? "ᱚ" : studentLang === "hi" || studentLang === "mr" ? "अ" : studentLang === "bn" ? "অ" : studentLang === "ta" ? "அ" : studentLang === "te" ? "అ" : "A"}
                   </div>
                   <div className="grid grid-cols-3 gap-3 pt-2">
-                    {(studentLang === "sat" ? ["ᱚ", "ᱛ", "ᱜ"] : studentLang === "hi" || studentLang === "mr" ? ["अ", "क", "म"] : studentLang === "bn" ? ["অ", "ক", "ম"] : studentLang === "ta" ? ["அ", "க", "ம"] : studentLang === "te" ? ["అ", "క", "మ"] : ["A", "B", "C"]).map((char) => (
+                    {(studentLang === "sat" ? ["ᱚ", "ᱛ", "ᱜ"] : studentLang === "hi" || studentLang === "mr" ? ["अ", "क", "म"] : studentLang === "bn" ? ["অ", "ক", "ম"] : studentLang === "ta" ? ["அ", "க", "ம"] : studentLang === "te" ? ["అ", "క", "మ"] : ["A", "B", "C"]).map((char) => {
+                      const isSelected = selectedGameAnswers[1] === char;
+                      return (
                       <button
                         key={char}
                         onClick={() => {
+                          setSelectedGameAnswers((prev) => ({ ...prev, [1]: char }));
                           if (char === (studentLang === "sat" ? "ᱚ" : studentLang === "hi" || studentLang === "mr" ? "अ" : studentLang === "bn" ? "অ" : studentLang === "ta" ? "அ" : studentLang === "te" ? "అ" : "A")) {
                             setGameScore((s) => s + 10);
                             playSyntheticAudio(studentLang === "sat" ? "ᱟᱹᱰᱤ ᱵᱮᱥ!" : studentLang === "hi" ? "बहुत बढ़िया!" : "Well done!", studentLang);
                           }
                         }}
-                        className="py-4 rounded-2xl bg-[var(--surface-2)] border-2 border-[var(--border)] hover:border-[var(--brand)] text-3xl font-black text-[var(--text-primary)] transition active:scale-95"
+                        className={`py-4 rounded-2xl border-2 transition active:scale-95 text-3xl font-black ${
+                          isSelected
+                            ? "bg-[var(--brand-tint)] border-[var(--brand)] text-[var(--brand-deep)]"
+                            : "bg-[var(--surface-2)] border-[var(--border)] hover:border-[var(--brand)] text-[var(--text-primary)]"
+                        }`}
                       >
                         {char}
                       </button>
-                    ))}
+                    )})}
                   </div>
                 </div>
               )}
@@ -1568,20 +1610,27 @@ export default function StudentConsole() {
                       : studentLang === "te"
                       ? [{ name: "ఏనుగు", correct: true }, { name: "సింహం", correct: false }]
                       : [{ name: "Elephant", correct: true }, { name: "Rooster", correct: false }]
-                    ).map((opt, idx) => (
+                    ).map((opt, idx) => {
+                      const isSelected = selectedGameAnswers[2] === opt.name;
+                      return (
                       <button
                         key={idx}
                         onClick={() => {
+                          setSelectedGameAnswers((prev) => ({ ...prev, [2]: opt.name }));
                           if (opt.correct) {
                             setGameScore((s) => s + 10);
                             playSyntheticAudio(studentLang === "sat" ? "ᱥᱟᱹᱨᱤ ᱜᱮ! ᱦᱟᱹᱛᱤ" : studentLang === "hi" ? "सही उत्तर! हाथी" : "Correct! Elephant", studentLang);
                           }
                         }}
-                        className="py-3.5 rounded-xl bg-[var(--surface-2)] border-2 border-[var(--border)] hover:border-[var(--brand)] text-sm font-bold text-[var(--text-primary)] transition active:scale-95"
+                        className={`py-3.5 rounded-xl border-2 transition active:scale-95 text-sm font-bold ${
+                          isSelected
+                            ? "bg-[var(--brand-tint)] border-[var(--brand)] text-[var(--brand-deep)]"
+                            : "bg-[var(--surface-2)] border-[var(--border)] hover:border-[var(--brand)] text-[var(--text-primary)]"
+                        }`}
                       >
                         {opt.name}
                       </button>
-                    ))}
+                    )})}
                   </div>
                 </div>
               )}

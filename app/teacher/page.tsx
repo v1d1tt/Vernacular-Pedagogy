@@ -29,10 +29,8 @@ import { useLanguage } from "@/components/language-provider";
 import {
   Mic,
   MicOff,
-  Hand,
   Check,
   X,
-  Sparkles,
   ArrowLeft,
   Send,
   Radio,
@@ -44,12 +42,12 @@ import {
   Power,
   Layers,
   Clock,
-  Volume2,
   Plus,
   RefreshCw,
   School,
 } from "lucide-react";
 import { MicWaveform } from "@/components/mic-waveform";
+import { Mascot } from "@/components/mascot";
 
 export interface SessionInfo {
   session_id: string;
@@ -763,9 +761,9 @@ export default function TeacherConsole() {
           {/* Prominent Class Banner when active */}
           {activeSession && (
             <div className="vs-surface rounded-2xl p-4 border border-[var(--brand-tint2)] bg-gradient-to-r from-[var(--surface)] to-[var(--brand-tint)]/20 flex flex-wrap items-center justify-between gap-3 shadow-2xs">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-[var(--brand-tint)] border border-[var(--brand-tint2)] flex items-center justify-center text-[var(--brand-deep)] font-black text-lg">
-                  🔑
+              <div className="flex items-center gap-4">
+                <div className="shrink-0 bg-white/60 rounded-full shadow-sm p-1">
+                  <Mascot src="/animations/owlsanimation.lottie" width={60} height={60} />
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
@@ -913,7 +911,7 @@ export default function TeacherConsole() {
           <div className="flex-1 vs-surface rounded-2xl flex flex-col overflow-hidden min-h-[360px] border border-[var(--border)] shadow-xs">
             <div className="px-5 py-3.5 border-b border-[var(--border-sub)] flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Volume2 className="w-4 h-4 text-[var(--brand-deep)]" />
+                <Mascot src="/animations/owl-birdanimation.lottie" width={24} height={24} />
                 <h3 className="text-sm font-bold text-[var(--text-primary)]">
                   {t("liveTranslationFeed") || "Live Translation Stream"}
                 </h3>
@@ -926,8 +924,8 @@ export default function TeacherConsole() {
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {transcripts.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-center py-12 space-y-3">
-                  <div className="w-14 h-14 rounded-2xl bg-[var(--brand-tint)] flex items-center justify-center">
-                    <Mic className="w-7 h-7 text-[var(--brand)]" />
+                  <div className="flex justify-center mx-auto mb-2">
+                    <Mascot src="/animations/sound-recognization.lottie" width={160} height={160} />
                   </div>
                   <div>
                     <p className="text-sm font-bold text-[var(--text-secondary)]">
@@ -1005,7 +1003,7 @@ export default function TeacherConsole() {
           <div className="vs-surface rounded-2xl overflow-hidden border border-[var(--border)] shadow-xs">
             <div className="px-5 py-3.5 border-b border-[var(--border-sub)] flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Hand className="w-4 h-4 text-[var(--red)]" />
+                <Mascot src="/animations/blue-owl-blinking-eyesanimation.lottie" width={24} height={24} />
                 <h3 className="text-sm font-bold text-[var(--text-primary)]">
                   {t("raiseHandTitle") || "Student Hands"}
                 </h3>
@@ -1064,7 +1062,7 @@ export default function TeacherConsole() {
           <div className="flex-1 vs-surface rounded-2xl overflow-hidden flex flex-col border border-[var(--border)] shadow-xs">
             <div className="px-5 py-3.5 border-b border-[var(--border-sub)] flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-[var(--amber)]" />
+                <Mascot src="/animations/owl-birdanimation.lottie" width={24} height={24} />
                 <h3 className="text-sm font-bold text-[var(--text-primary)]">
                   {t("generateActivityTitle") || "Lesson AI Content"}
                 </h3>
@@ -1269,7 +1267,9 @@ export default function TeacherConsole() {
                 {pendingActivities.length === 0 && publishedActivities.length === 0 && (
                   <div className="flex-1 flex items-center justify-center py-10 text-center">
                     <div>
-                      <Sparkles className="w-8 h-8 text-[var(--amber)] mx-auto mb-2 opacity-50" />
+                      <div className="flex justify-center mx-auto mb-3">
+                        <Mascot src="/animations/owlhianimation.lottie" width={160} height={160} />
+                      </div>
                       <p className="text-xs text-[var(--text-muted)]">
                         {t("generateHint") || "Click '+ Quiz' or '+ Cards' to create activities from your lesson"}
                       </p>

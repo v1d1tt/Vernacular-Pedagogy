@@ -12,6 +12,7 @@ import {
   Wifi, School, Eye, EyeOff, AlertCircle
 } from "lucide-react";
 import { LanguageCode } from "@/lib/translations";
+import { Mascot } from "@/components/mascot";
 
 type TeacherAuthMode = "login" | "signup";
 
@@ -284,6 +285,9 @@ export default function VaaniSetuOnboarding() {
             व
           </div>
           <span className="font-extrabold vs-text text-lg tracking-tight">{t("appName")}</span>
+          <div className="ml-2 hidden sm:block">
+            <Mascot src="/animations/owlhianimation.lottie" width={40} height={40} />
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <div className="hidden sm:flex items-center gap-1.5 text-xs font-semibold vs-tint px-3 py-1.5 rounded-full border vs-tint-border">
@@ -383,14 +387,19 @@ export default function VaaniSetuOnboarding() {
           {/* ── STEP 1: Language Selection ─────────────────────────────── */}
           {step === 1 && (
             <div className="vs-surface rounded-3xl p-6 sm:p-8 space-y-6 shadow-xl border border-[var(--border)]">
-              <div>
-                <div className="flex items-center gap-2 text-xs font-bold text-[var(--brand-deep)] uppercase tracking-wider mb-1">
-                  <Globe className="w-4 h-4 text-[var(--brand)]" /> {t("stepCounter")} 1 / 3
+              <div className="flex flex-col sm:flex-row items-start justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2 text-xs font-bold text-[var(--brand-deep)] uppercase tracking-wider mb-1">
+                    <Globe className="w-4 h-4 text-[var(--brand)]" /> {t("stepCounter")} 1 / 3
+                  </div>
+                  <h2 className="text-2xl font-extrabold text-[var(--text-primary)] tracking-tight">
+                    {t("selectLanguageTitle")}
+                  </h2>
+                  <p className="text-xs text-[var(--text-muted)] mt-1">{t("selectLanguageSub")}</p>
                 </div>
-                <h2 className="text-2xl font-extrabold text-[var(--text-primary)] tracking-tight">
-                  {t("selectLanguageTitle")}
-                </h2>
-                <p className="text-xs text-[var(--text-muted)] mt-1">{t("selectLanguageSub")}</p>
+                <div className="hidden sm:block shrink-0">
+                  <Mascot src="/animations/education.lottie" width={140} height={140} />
+                </div>
               </div>
 
               {/* Primary language buttons: Hindi, Santali, English */}
@@ -459,9 +468,14 @@ export default function VaaniSetuOnboarding() {
                 </span>
               </div>
 
-              <div>
-                <h2 className="text-2xl font-extrabold text-[var(--text-primary)] tracking-tight">{t("chooseRoleTitle")}</h2>
-                <p className="text-xs text-[var(--text-muted)] mt-1">{t("chooseRoleSub")}</p>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-extrabold text-[var(--text-primary)] tracking-tight">{t("chooseRoleTitle")}</h2>
+                  <p className="text-xs text-[var(--text-muted)] mt-1">{t("chooseRoleSub")}</p>
+                </div>
+                <div className="hidden sm:block shrink-0 -mt-2">
+                  <Mascot src="/animations/owlsanimation.lottie" width={80} height={80} />
+                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -536,9 +550,14 @@ export default function VaaniSetuOnboarding() {
               {/* ── LOGIN FORM ── */}
               {teacherAuthMode === "login" && (
                 <div className="space-y-4">
-                  <div>
-                    <h2 className="text-xl font-extrabold text-[var(--text-primary)]">{t("teacherLoginTitle")}</h2>
-                    <p className="text-xs text-[var(--text-muted)] mt-0.5">{t("teacherLoginSub")}</p>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-xl font-extrabold text-[var(--text-primary)]">{t("teacherLoginTitle")}</h2>
+                      <p className="text-xs text-[var(--text-muted)] mt-0.5">{t("teacherLoginSub")}</p>
+                    </div>
+                    <div className="shrink-0 -mr-2">
+                      <Mascot src="/animations/blue-owl-blinking-eyesanimation.lottie" width={60} height={60} />
+                    </div>
                   </div>
 
                   <div className="space-y-3">
@@ -595,9 +614,14 @@ export default function VaaniSetuOnboarding() {
               {/* ── SIGNUP FORM ── */}
               {teacherAuthMode === "signup" && (
                 <div className="space-y-4">
-                  <div>
-                    <h2 className="text-xl font-extrabold text-[var(--text-primary)]">{t("teacherSignupTitle")}</h2>
-                    <p className="text-xs text-[var(--text-muted)] mt-0.5">{t("teacherSignupSub")}</p>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-xl font-extrabold text-[var(--text-primary)]">{t("teacherSignupTitle")}</h2>
+                      <p className="text-xs text-[var(--text-muted)] mt-0.5">{t("teacherSignupSub")}</p>
+                    </div>
+                    <div className="shrink-0 -mr-2">
+                      <Mascot src="/animations/blue-owl-blinking-eyesanimation.lottie" width={60} height={60} />
+                    </div>
                   </div>
 
                   <div className="space-y-3">
@@ -697,9 +721,14 @@ export default function VaaniSetuOnboarding() {
                 </span>
               </div>
 
-              <div>
-                <h2 className="text-2xl font-extrabold text-[var(--text-primary)] tracking-tight">{t("studentRegTitle")}</h2>
-                <p className="text-xs text-[var(--text-muted)] mt-1">{t("studentRegSub")}</p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-2xl font-extrabold text-[var(--text-primary)] tracking-tight">{t("studentRegTitle")}</h2>
+                  <p className="text-xs text-[var(--text-muted)] mt-1">{t("studentRegSub")}</p>
+                </div>
+                <div className="shrink-0">
+                  <Mascot src="/animations/blue-owl-blinking-eyesanimation.lottie" width={60} height={60} />
+                </div>
               </div>
 
               <div className="space-y-4">

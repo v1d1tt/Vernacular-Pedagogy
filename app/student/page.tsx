@@ -36,7 +36,7 @@ import {
   Key,
   X,
 } from "lucide-react";
-import { MicWaveform } from "@/components/mic-waveform";
+import { Mascot } from "@/components/mascot";
 import { prepareTtsText } from "@/lib/ol-chiki";
 
 export interface StudentActivity {
@@ -491,7 +491,11 @@ export default function StudentConsole() {
             }
           } catch (e) {
             console.warn("Class code lookup failed:", e);
-            setConnectError("Class code not found on the server. Check the teacher's CODE and retry.");
+            localStorage.removeItem("user_class_code");
+            localStorage.removeItem("user_joined_session_id");
+            setJoinedSession(null);
+            setConnectError(`Class code "${savedCode.trim().toUpperCase()}" not found or session ended. Please enter the current Class Code from your teacher.`);
+            return;
           }
         }
 
@@ -517,43 +521,47 @@ export default function StudentConsole() {
         }
 
         if (targetSessionId) {
-          // Re-join every time so the server knows this device + language.
-          // IMPORTANT: persist the server's participant_id (uuid) — raise-hand
-          // and permission events key off it, not the local P-xxx.
-          const joinRes = await joinSession(targetSessionId, {
-            student_id: participantId,
-            student_name: studentName,
-            preferred_language: studentLang,
-          });
-          const srvPid: string = joinRes.participant_id;
-          setServerParticipantId(srvPid);
-          // Capture class metadata from join response
-          if (joinRes.course_name) setClassSubject(joinRes.course_name);
-          if (joinRes.grade) setClassGrade(Number(joinRes.grade));
           try {
-            localStorage.setItem("user_server_participant_id", srvPid);
-          } catch {}
-          setJoinedSession({ session_id: targetSessionId });
-          localStorage.setItem("user_joined_session_id", targetSessionId);
+            // Re-join every time so the server knows this device + language.
+            const joinRes = await joinSession(targetSessionId, {
+              student_id: participantId,
+              student_name: studentName,
+              preferred_language: studentLang,
+            });
+            const srvPid: string = joinRes.participant_id;
+            setServerParticipantId(srvPid);
+            // Capture class metadata from join response
+            if (joinRes.course_name) setClassSubject(joinRes.course_name);
+            if (joinRes.grade) setClassGrade(Number(joinRes.grade));
+            try {
+              localStorage.setItem("user_server_participant_id", srvPid);
+            } catch {}
+            setJoinedSession({ session_id: targetSessionId });
+            localStorage.setItem("user_joined_session_id", targetSessionId);
 
-          try {
-            const res = await fetchPublishedActivities(targetSessionId, studentLang);
-            if (res && res.activities && res.activities.length > 0) {
-              setActivities(res.activities as StudentActivity[]);
+            try {
+              const res = await fetchPublishedActivities(targetSessionId, studentLang);
+              if (res && res.activities && res.activities.length > 0) {
+                setActivities(res.activities as StudentActivity[]);
+              }
+            } catch (e) {
+              console.warn("fetchPublishedActivities failed:", e);
             }
-          } catch (e) {
-            console.warn("fetchPublishedActivities failed:", e);
-          }
 
-          attachSessionWebSocket(targetSessionId, srvPid);
-          // Fallback: if we had a stale pid stored, still accept events for it
-          if (savedPid && savedPid !== srvPid) {
-            console.log("Rotated participant id", savedPid, "->", srvPid);
+            attachSessionWebSocket(targetSessionId, srvPid);
+            if (savedPid && savedPid !== srvPid) {
+              console.log("Rotated participant id", savedPid, "->", srvPid);
+            }
+          } catch (joinErr) {
+            console.warn("joinSession failed:", joinErr);
+            localStorage.removeItem("user_joined_session_id");
+            setJoinedSession(null);
+            setConnectError("The class session is no longer active. Please ask your teacher for the new Class Code.");
           }
         } else {
           setJoinedSession(null);
           if (!savedCode.trim()) {
-            setConnectError("No live class found on the server. Enter the teacher's class CODE above.");
+            setConnectError("No live class found on the server. Click 'Enter Class Code' above to join your teacher's class.");
           }
         }
       } catch (err) {
@@ -973,11 +981,18 @@ export default function StudentConsole() {
                     <Globe className="w-3.5 h-3.5" />
                     <span>In your language ({studentLangName})</span>
                   </span>
-                  {isPlayingAudio && <MicWaveform isSpeaking={true} />}
                 </div>
-                <p className="text-xl font-extrabold text-[var(--text-primary)] leading-relaxed">
-                  &ldquo;{translatedSpeech}&rdquo;
-                </p>
+                
+                <div className="flex items-center justify-between gap-3 mt-1">
+                  <p className="text-xl font-extrabold text-[var(--text-primary)] leading-relaxed flex-1">
+                    &ldquo;{translatedSpeech}&rdquo;
+                  </p>
+                  {isPlayingAudio && (
+                    <div className="shrink-0 -my-2 -mr-1 animate-fadeIn">
+                      <Mascot src="/animations/sound-recognization.lottie" width={64} height={64} />
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Replay in Student's Language Button */}
@@ -1007,13 +1022,18 @@ export default function StudentConsole() {
             {/* Speaking Options Card (Hand Raise Required) */}
             <div className="vs-surface rounded-2xl p-5 border border-[var(--border)] shadow-xs space-y-4">
               <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-bold text-[var(--text-primary)]">
-                    {t("wantToSpeak") || "Ask or Speak to Teacher"}
-                  </h3>
-                  <p className="text-xs text-[var(--text-muted)] mt-0.5">
-                    {t("speakOrRaiseHand")}
-                  </p>
+                <div className="flex items-center gap-4">
+                  <div className="shrink-0 -ml-2">
+                    <Mascot src="/animations/questionanimation.lottie" width={90} height={90} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-[var(--text-primary)]">
+                      {t("wantToSpeak") || "Want to speak?"}
+                    </h3>
+                    <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                      {t("speakOrRaiseHand") || "Raise your hand to request the microphone from your teacher"}
+                    </p>
+                  </div>
                 </div>
                 {raisedHand && !canSpeak && (
                   <span className="text-xs font-bold text-[var(--amber)] bg-[var(--amber-tint)] px-3 py-1 rounded-full animate-pulse">
@@ -1074,8 +1094,8 @@ export default function StudentConsole() {
               if (quizList.length === 0) {
                 return (
                   <div className="vs-surface rounded-2xl p-10 text-center space-y-4 border border-[var(--border)]">
-                    <div className="w-14 h-14 rounded-2xl bg-[var(--brand-tint)] flex items-center justify-center mx-auto">
-                      <HelpCircle className="w-7 h-7 text-[var(--brand)]" />
+                    <div className="flex justify-center mx-auto mb-4">
+                      <Mascot src="/animations/owl-birdanimation.lottie" width={160} height={160} />
                     </div>
                     <div>
                       <p className="text-sm font-bold text-[var(--text-secondary)]">
@@ -1219,8 +1239,8 @@ export default function StudentConsole() {
               if (worksheetList.length === 0) {
                 return (
                   <div className="vs-surface rounded-2xl p-10 text-center space-y-4 border border-[var(--border)]">
-                    <div className="w-14 h-14 rounded-2xl bg-[var(--brand-tint)] flex items-center justify-center mx-auto">
-                      <BookOpen className="w-7 h-7 text-[var(--brand)]" />
+                    <div className="flex justify-center mx-auto mb-4">
+                      <Mascot src="/animations/learninganimation.lottie" width={140} height={140} />
                     </div>
                     <div>
                       <p className="text-sm font-bold text-[var(--text-secondary)]">No Worksheet Available</p>
@@ -1428,16 +1448,21 @@ export default function StudentConsole() {
         {activeTab === "GAMES" && (
           <div className="space-y-4">
             <div className="vs-surface rounded-2xl p-5 border border-[var(--brand-tint2)] bg-[var(--brand-tint)]/40 flex items-center justify-between shadow-xs">
-              <div>
-                <div className="flex items-center gap-2">
-                  <Award className="w-5 h-5 text-[var(--brand-deep)]" />
-                  <h3 className="text-sm font-extrabold text-[var(--brand-deep)]">
-                    {t("nipunGamesTitle")}
-                  </h3>
+              <div className="flex items-center gap-3">
+                <div className="shrink-0">
+                  <Mascot src="/animations/owl-birdanimation.lottie" width={40} height={40} />
                 </div>
-                <p className="text-xs text-[var(--text-secondary)] mt-0.5">
-                  {t("interactiveGamesDesc")} {grade} · <span className="font-bold">{studentLangName}</span>
-                </p>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Award className="w-5 h-5 text-[var(--brand-deep)]" />
+                    <h3 className="text-sm font-extrabold text-[var(--brand-deep)]">
+                      {t("nipunGamesTitle")}
+                    </h3>
+                  </div>
+                  <p className="text-xs text-[var(--text-secondary)] mt-0.5">
+                    {t("interactiveGamesDesc")} {grade} · <span className="font-bold">{studentLangName}</span>
+                  </p>
+                </div>
               </div>
               <div className="px-3.5 py-1.5 rounded-xl bg-[var(--surface)] border border-[var(--brand-tint2)] text-xs font-black text-[var(--brand-deep)] shadow-2xs">
                 ⭐ {gameScore} {t("stars")}

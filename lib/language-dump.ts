@@ -54,6 +54,51 @@ export const DUMP_PROMPTS: DumpPrompt[] = [
   { id: "s4", category: "School", reference: "Draw a circle." },
 ];
 
+export const DUMP_PROMPTS_HI: Record<string, string> = {
+  g1: "नमस्ते बच्चों",
+  g2: "सुप्रभात",
+  g3: "आप कैसे हैं?",
+  g4: "धन्यवाद",
+  g5: "बहुत बढ़िया, अति उत्तम!",
+  c1: "आज हम गणित में जोड़ना सीखेंगे।",
+  c2: "पेड़ पर कितने सेब हैं?",
+  c3: "दो में तीन जोड़ने पर क्या मिलेगा?",
+  c4: "कृपया अपनी पुस्तकें खोलें।",
+  c5: "बोलने के लिए हाथ उठाएं।",
+  c6: "ध्यान से सुनें।",
+  c7: "मेरे बाद दोहराएं।",
+  c8: "आज की कक्षा समाप्त हुई।",
+  n1: "एक",
+  n2: "दो",
+  n3: "तीन",
+  n4: "चार",
+  n5: "पांच",
+  n6: "छह",
+  n7: "सात",
+  n8: "आठ",
+  n9: "नौ",
+  n10: "दस",
+  w1: "सूरज",
+  w2: "पेड़",
+  w3: "पानी",
+  w4: "फूल",
+  w5: "सेब",
+  w6: "हाथी",
+  w7: "मछली",
+  w8: "पक्षी",
+  s1: "वाक्य को ज़ोर से पढ़ें।",
+  s2: "दो वाक्य लिखें।",
+  s3: "तारों की गिनती करें।",
+  s4: "एक वृत्त बनाएं।",
+};
+
+export function getPromptReference(prompt: DumpPrompt, lang: string): string {
+  if (lang === "hi") {
+    return DUMP_PROMPTS_HI[prompt.id] || prompt.reference;
+  }
+  return prompt.reference;
+}
+
 export interface DumpRecording {
   audioBase64: string;
   recordedAt: string;

@@ -12,6 +12,7 @@ import {
   DumpRecordings,
   pcmBase64ToWavUrl,
   buildDumpExport,
+  getPromptReference,
 } from "@/lib/language-dump";
 import {
   ArrowLeft,
@@ -304,7 +305,7 @@ export default function LanguageDumpPage() {
                     <Circle className="w-5 h-5 text-[var(--text-muted)] shrink-0" />
                   )}
                   <p className="flex-1 text-sm font-bold text-[var(--text-primary)] leading-snug">
-                    &ldquo;{p.reference}&rdquo;
+                    &ldquo;{getPromptReference(p, lang)}&rdquo;
                   </p>
                   {rec && (
                     <button

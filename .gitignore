@@ -41,7 +41,17 @@ yarn-error.log*
 next-env.d.ts
 
 # python
-__pycache__/
+**/__pycache__/
 *.pyc
 server/venv/
+
+# runtime databases
+*.db
+edge_classroom.db
+
+# local test media & model weights
+*.wav
+*.png
+server/models/indicconformer-*/
+server/models/whisper-hindi-*/
 

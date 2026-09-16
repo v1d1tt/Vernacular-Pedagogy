@@ -1053,7 +1053,7 @@ export default function StudentConsole() {
               <p className="text-sm font-extrabold text-[var(--text-primary)] leading-none truncate">{studentName}</p>
               <p className="text-[10px] text-[var(--text-muted)] mt-0.5 font-medium truncate">
                 {t("class")} {classGrade || grade}
-                · <span className="text-[var(--brand-deep)] font-bold">{studentLangName}</span>
+                · <span className="text-[var(--brand-deep)] font-bold">{currentLanguage?.nativeName || studentLangName}</span>
               </p>
             </div>
           </div>
@@ -1440,9 +1440,9 @@ export default function StudentConsole() {
                       <Mascot src="/animations/learninganimation.lottie" width={140} height={140} />
                     </div>
                     <div>
-                      <p className="text-sm font-bold text-[var(--text-secondary)]">No Worksheet Available</p>
+                      <p className="text-sm font-bold text-[var(--text-secondary)]">{t("noWorksheetYet") || "No Worksheet Available"}</p>
                       <p className="text-xs text-[var(--text-muted)] mt-1">
-                        Worksheets assigned by your teacher will appear here.
+                        {t("noWorksheetSub") || "Worksheets assigned by your teacher will appear here."}
                       </p>
                     </div>
                   </div>

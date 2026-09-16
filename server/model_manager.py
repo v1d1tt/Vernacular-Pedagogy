@@ -243,12 +243,16 @@ class EdgeModelManager:
             self._santali_model.eval()
 
             # Tokenizer is in the fine-tuned repo (Ol Chiki tokens added)
-            self._santali_tokenizer = WhisperTokenizer.from_pretrained(model_source)
+            try:
+                self._santali_tokenizer = WhisperTokenizer.from_pretrained(model_source)
+            except Exception:
+                self._santali_tokenizer = WhisperTokenizer.from_pretrained("openai/whisper-small")
 
             # Feature extractor is identical to the base model (same mel-spectrogram config)
-            fe_source = (local_path if (WHISPER_SANTALI_DIR / "preprocessor_config.json").exists()
-                         else "openai/whisper-small")
-            self._santali_feature_extractor = WhisperFeatureExtractor.from_pretrained(fe_source)
+            try:
+                self._santali_feature_extractor = WhisperFeatureExtractor.from_pretrained(model_source)
+            except Exception:
+                self._santali_feature_extractor = WhisperFeatureExtractor.from_pretrained("openai/whisper-small")
 
             # Persist all components locally for offline use
             if not WHISPER_SANTALI_DIR.exists():
@@ -551,7 +555,12 @@ class EdgeModelManager:
             self._active_models["slm_generator"] = "LOADING (swapped)"
             logger.info("Mounting SmolLM2-360M into RAM...")
 
-            tokenizer = Tokenizer.from_file(str(tok_file))
+            tok_data = json.loads(tok_file.read_text(encoding="utf-8"))
+            if "model" in tok_data and "merges" in tok_data["model"] and tok_data["model"]["merges"]:
+                if isinstance(tok_data["model"]["merges"][0], list):
+                    tok_data["model"]["merges"] = [" ".join(pair) for pair in tok_data["model"]["merges"]]
+            tokenizer = Tokenizer.from_str(json.dumps(tok_data))
+
             opts = ort.SessionOptions()
             opts.intra_op_num_threads = 2
             session = ort.InferenceSession(str(model_file), sess_options=opts)

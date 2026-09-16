@@ -109,8 +109,15 @@ class IndicTransONNX:
         self._ip = IndicProcessor(inference=True)
 
         # Tokenizers
-        self._src_tok = Tokenizer.from_file(str(snap / "tokenizer_src.json"))
-        self._tgt_tok = Tokenizer.from_file(str(snap / "tokenizer_tgt.json"))
+        def _load_tokenizer(path: Path) -> Tokenizer:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if "model" in data and "merges" in data["model"] and data["model"]["merges"]:
+                if isinstance(data["model"]["merges"][0], list):
+                    data["model"]["merges"] = [" ".join(pair) for pair in data["model"]["merges"]]
+            return Tokenizer.from_str(json.dumps(data))
+
+        self._src_tok = _load_tokenizer(snap / "tokenizer_src.json")
+        self._tgt_tok = _load_tokenizer(snap / "tokenizer_tgt.json")
         self._meta: dict = json.loads((snap / "tokenizer_meta.json").read_text(encoding="utf-8"))
 
         # Generation config (decoder start / eos IDs)
